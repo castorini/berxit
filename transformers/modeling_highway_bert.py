@@ -50,10 +50,12 @@ class BertEncoder(nn.Module):
         self.output_attentions = config.output_attentions
         self.output_hidden_states = config.output_hidden_states
         self.layer = nn.ModuleList([BertLayer(config) for _ in range(config.num_hidden_layers)])
+        self.highway = nn.ModuleList([BertHighway(config) for _ in range(config.num_hidden_layers)])
 
     def forward(self, hidden_states, attention_mask=None, head_mask=None, encoder_hidden_states=None, encoder_attention_mask=None):
         all_hidden_states = ()
         all_attentions = ()
+        all_highway_exits = ()
         for i, layer_module in enumerate(self.layer):
             if self.output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_states,)
@@ -64,6 +66,15 @@ class BertEncoder(nn.Module):
             if self.output_attentions:
                 all_attentions = all_attentions + (layer_outputs[1],)
 
+            current_outputs = (hidden_states,)
+            if self.output_hidden_states:
+                current_outputs = current_outputs + (all_hidden_states,)
+            if self.output_attentions:
+                current_outputs = current_outputs + (all_attentions,)
+
+            highway_exit = self.highway[i](current_outputs)
+            all_highway_exits = all_highway_exits + (highway_exit,)
+
         # Add last layer
         if self.output_hidden_states:
             all_hidden_states = all_hidden_states + (hidden_states,)
@@ -73,7 +84,9 @@ class BertEncoder(nn.Module):
             outputs = outputs + (all_hidden_states,)
         if self.output_attentions:
             outputs = outputs + (all_attentions,)
-        return outputs  # last-layer hidden state, (all hidden states), (all attentions)
+
+        outputs = outputs + (all_highway_exits,)
+        return outputs  # last-layer hidden state, (all hidden states), (all attentions), all highway exits
 
 
 class BertPooler(nn.Module):
@@ -239,7 +252,45 @@ class BertModel(BertPreTrainedModel):
         pooled_output = self.pooler(sequence_output)
 
         outputs = (sequence_output, pooled_output,) + encoder_outputs[1:]  # add hidden_states and attentions if they are here
-        return outputs  # sequence_output, pooled_output, (hidden_states), (attentions)
+        return outputs  # sequence_output, pooled_output, (hidden_states), (attentions), highway exits
+
+
+class BertHighway(nn.Module):
+    r"""A module to provide a shortcut
+    from
+    the output of one non-final BertLayer in BertEncoder
+    to
+    cross-entropy computation in BertForSequenceClassification
+    """
+    def __init__(self, config):
+        super(BertHighway, self).__init__()
+        self.pooler = BertPooler(config)
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+        self.classifier = nn.Linear(config.hidden_size, config.num_labels)
+
+    def forward(self, encoder_outputs):
+        # Pooler
+        pooler_input = encoder_outputs[0]
+        first_token_tensor = pooler_input[:, 0]
+        pooled_output = self.pooler.dense(first_token_tensor)
+        pooler_output = self.pooler.activation(pooled_output)
+        # "return" pooler_output
+
+        # BertModel
+        bmodel_output = (pooler_input, pooler_output) + encoder_outputs[1:]
+        # "return" bodel_output
+
+        # Dropout and classification
+        pooled_output = bmodel_output[1]
+
+        pooled_output = self.dropout(pooled_output)
+        logits = self.classifier(pooled_output)
+        if self.training:
+            return logits, pooled_output
+        else:
+            return logits, pooled_output
+            # check entropy of logits and raise exception
+            pass
 
 
 class BertForSequenceClassification(BertPreTrainedModel):
@@ -292,7 +343,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
                             position_ids=position_ids,
                             head_mask=head_mask,
                             inputs_embeds=inputs_embeds)
-
+        # sequence_output, pooled_output, (hidden_states), (attentions), highway exits
         pooled_output = outputs[1]
 
         pooled_output = self.dropout(pooled_output)
@@ -308,6 +359,22 @@ class BertForSequenceClassification(BertPreTrainedModel):
             else:
                 loss_fct = CrossEntropyLoss()
                 loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
-            outputs = (loss,) + outputs
+
+            # work with highway exits
+            highway_losses = []
+            for highway_exit in outputs[-1]:
+                highway_logits = highway_exit[0]
+                if self.num_labels == 1:
+                    #  We are doing regression
+                    loss_fct = MSELoss()
+                    highway_loss = loss_fct(highway_logits.view(-1),
+                                            labels.view(-1))
+                else:
+                    loss_fct = CrossEntropyLoss()
+                    highway_loss = loss_fct(highway_logits.view(-1, self.num_labels),
+                                            labels.view(-1))
+                highway_losses.append(highway_loss)
+
+            outputs = (loss + sum(highway_losses),) + outputs
 
         return outputs  # (loss), logits, (hidden_states), (attentions)
