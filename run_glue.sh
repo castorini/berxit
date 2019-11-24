@@ -1,7 +1,9 @@
-export TASK_NAME=STS-B
+export TASK_NAME=MRPC
 export OUTPUT_DIR="./saved_models/"
+export USE_HIGHWAY=True
 
 python -um examples.run_glue \
+    --use_highway $USE_HIGHWAY \
     --model_type bert \
     --model_name_or_path bert-base-uncased \
     --task_name $TASK_NAME \
@@ -16,4 +18,4 @@ python -um examples.run_glue \
     --num_train_epochs 3.0 \
     --overwrite_output_dir \
     --output_dir $OUTPUT_DIR \
-    --save_steps 719
+    --save_steps 0

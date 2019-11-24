@@ -4,6 +4,13 @@ from torch.nn import CrossEntropyLoss, MSELoss
 
 from .modeling_bert import BertLayer, BertLayerNorm, BertPreTrainedModel
 
+def entropy(x):
+    # x: torch.Tensor, logits BEFORE softmax
+    exp_x = torch.exp(x)
+    A = torch.sum(exp_x, dim=1)    # sum of exp(x_i)
+    B = torch.sum(x*exp_x, dim=1)  # sum of x_i * exp(x_i)
+    return torch.log(A) - B/A
+
 
 class BertEmbeddings(nn.Module):
     """Construct the embeddings from word, position and token_type embeddings.
@@ -52,6 +59,12 @@ class BertEncoder(nn.Module):
         self.layer = nn.ModuleList([BertLayer(config) for _ in range(config.num_hidden_layers)])
         self.highway = nn.ModuleList([BertHighway(config) for _ in range(config.num_hidden_layers)])
 
+    def init_highway_pooler(self, pooler):
+        loaded_model = pooler.state_dict()
+        for highway in self.highway:
+            for name, param in highway.pooler.state_dict().items():
+                param.copy_(loaded_model[name])
+
     def forward(self, hidden_states, attention_mask=None, head_mask=None, encoder_hidden_states=None, encoder_attention_mask=None):
         all_hidden_states = ()
         all_attentions = ()
@@ -94,6 +107,8 @@ class BertPooler(nn.Module):
         super(BertPooler, self).__init__()
         self.dense = nn.Linear(config.hidden_size, config.hidden_size)
         self.activation = nn.Tanh()
+
+        # Pooler weights also needs to be loaded, especially in Highway!
 
     def forward(self, hidden_states):
         # We "pool" the model by simply taking the hidden state corresponding
@@ -142,6 +157,9 @@ class BertModel(BertPreTrainedModel):
         self.pooler = BertPooler(config)
 
         self.init_weights()
+
+    def init_highway_pooler(self):
+        self.encoder.init_highway_pooler(self.pooler)
 
     def get_input_embeddings(self):
         return self.embeddings.word_embeddings
@@ -255,6 +273,11 @@ class BertModel(BertPreTrainedModel):
         return outputs  # sequence_output, pooled_output, (hidden_states), (attentions), highway exits
 
 
+class HighwayException(Exception):
+    def __init__(self, message):
+        self.message = message
+
+
 class BertHighway(nn.Module):
     r"""A module to provide a shortcut
     from
@@ -286,6 +309,7 @@ class BertHighway(nn.Module):
         pooled_output = self.dropout(pooled_output)
         logits = self.classifier(pooled_output)
         if self.training:
+            # raise HighwayException(logits)
             return logits, pooled_output
         else:
             return logits, pooled_output
@@ -337,20 +361,26 @@ class BertForSequenceClassification(BertPreTrainedModel):
     def forward(self, input_ids=None, attention_mask=None, token_type_ids=None,
                 position_ids=None, head_mask=None, inputs_embeds=None, labels=None):
 
-        outputs = self.bert(input_ids,
-                            attention_mask=attention_mask,
-                            token_type_ids=token_type_ids,
-                            position_ids=position_ids,
-                            head_mask=head_mask,
-                            inputs_embeds=inputs_embeds)
-        # sequence_output, pooled_output, (hidden_states), (attentions), highway exits
+        try:
+            outputs = self.bert(input_ids,
+                                attention_mask=attention_mask,
+                                token_type_ids=token_type_ids,
+                                position_ids=position_ids,
+                                head_mask=head_mask,
+                                inputs_embeds=inputs_embeds)
+            # sequence_output, pooled_output, (hidden_states), (attentions), highway exits
+        except HighwayException as e:
+            print(e.message)
+            breakpoint()
         pooled_output = outputs[1]
 
         pooled_output = self.dropout(pooled_output)
         logits = self.classifier(pooled_output)
 
         outputs = (logits,) + outputs[2:]  # add hidden states and attention if they are here
-
+        if not self.training:
+            original_entropy = entropy(logits)
+            highway_entropy = []
         if labels is not None:
             if self.num_labels == 1:
                 #  We are doing regression
@@ -364,6 +394,8 @@ class BertForSequenceClassification(BertPreTrainedModel):
             highway_losses = []
             for highway_exit in outputs[-1]:
                 highway_logits = highway_exit[0]
+                if not self.training:
+                    highway_entropy.append(entropy(highway_logits))
                 if self.num_labels == 1:
                     #  We are doing regression
                     loss_fct = MSELoss()
@@ -376,5 +408,8 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 highway_losses.append(highway_loss)
 
             outputs = (loss + sum(highway_losses),) + outputs
+        if not self.training:
+            outputs = outputs + ((original_entropy, highway_entropy),)
+            # outputs = (outputs[0],) + (highway_logits,) + outputs[2:]  ## use the penultimate(?) layer
 
-        return outputs  # (loss), logits, (hidden_states), (attentions)
+        return outputs  # (loss), logits, (hidden_states), (attentions), entropy

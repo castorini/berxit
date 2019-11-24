@@ -12,6 +12,7 @@ try:
 except:
     pass
 
+import os
 import logging
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
@@ -65,7 +66,10 @@ if is_torch_available():
     from .modeling_auto import (AutoModel, AutoModelForSequenceClassification, AutoModelForQuestionAnswering,
                                 AutoModelWithLMHead)
 
-    from .modeling_highway_bert import (BertForSequenceClassification)
+    if os.environ["USE_HIGHWAY"] == "True":
+        from .modeling_highway_bert import (BertForSequenceClassification)
+    else:
+        from .modeling_bert import (BertForSequenceClassification)
     from .modeling_bert import (BertPreTrainedModel, BertModel, BertForPreTraining,
                                 BertForMaskedLM, BertForNextSentencePrediction,
                                 BertForMultipleChoice,
