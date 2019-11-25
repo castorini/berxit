@@ -141,6 +141,7 @@ serialization_dir
 debug.env
 
 # output file of logging
+logs/
 logging_out_file
 
 # model checkpoints

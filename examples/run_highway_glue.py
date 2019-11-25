@@ -38,7 +38,7 @@ except:
 from tqdm import tqdm, trange
 
 from transformers import (WEIGHTS_NAME, BertConfig,
-                                  BertForSequenceClassification, BertTokenizer,
+                                  BertTokenizer,
                                   RobertaConfig,
                                   RobertaForSequenceClassification,
                                   RobertaTokenizer,
@@ -49,6 +49,8 @@ from transformers import (WEIGHTS_NAME, BertConfig,
                                   DistilBertConfig,
                                   DistilBertForSequenceClassification,
                                   DistilBertTokenizer)
+
+from transformers.modeling_highway_bert import BertForSequenceClassification
 
 from transformers import AdamW, get_linear_schedule_with_warmup
 
@@ -465,6 +467,8 @@ def main():
                                         from_tf=bool('.ckpt' in args.model_name_or_path),
                                         config=config,
                                         cache_dir=args.cache_dir if args.cache_dir else None)
+
+    model.bert.init_highway_pooler()
 
     if args.local_rank == 0:
         torch.distributed.barrier()  # Make sure only the first process in distributed training will download model & vocab
