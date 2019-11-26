@@ -12,6 +12,6 @@ python -um examples.run_highway_glue \
     --learning_rate 2e-5 \
     --num_train_epochs 3.0 \
     --overwrite_output_dir \
-    --output_dir "./saved_models/" \
+    --output_dir ./saved_models/ \
     --save_steps 0 \
-    --seed 9102
+    --seed 42

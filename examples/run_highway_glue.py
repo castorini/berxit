@@ -17,7 +17,6 @@
 
 from __future__ import absolute_import, division, print_function
 
-import time
 import argparse
 import glob
 import logging
@@ -59,12 +58,14 @@ from transformers import glue_output_modes as output_modes
 from transformers import glue_processors as processors
 from transformers import glue_convert_examples_to_features as convert_examples_to_features
 
-logging.basicConfig(filename="logs/logging_out_file"+str(time.time()),
+log_folder = "logs"
+filecount = len([x for x in os.listdir(log_folder) if "log" in x])
+logging.basicConfig(filename="logs/{}.log".format(filecount),
                     filemode='w',
                     level=0)
 logger = logging.getLogger(__name__)
 
-ALL_MODELS = sum((tuple(conf.pretrained_config_archive_map.keys()) for conf in (BertConfig, XLNetConfig, XLMConfig, 
+ALL_MODELS = sum((tuple(conf.pretrained_config_archive_map.keys()) for conf in (BertConfig, XLNetConfig, XLMConfig,
                                                                                 RobertaConfig, DistilBertConfig)), ())
 
 MODEL_CLASSES = {
@@ -84,7 +85,7 @@ def set_seed(args):
         torch.cuda.manual_seed_all(args.seed)
 
 
-def train(args, train_dataset, model, tokenizer):
+def train(args, train_dataset, model, tokenizer, train_highway=False):
     """ Train the model """
     if args.local_rank in [-1, 0]:
         tb_writer = SummaryWriter()
@@ -101,9 +102,23 @@ def train(args, train_dataset, model, tokenizer):
 
     # Prepare optimizer and schedule (linear warmup and decay)
     no_decay = ['bias', 'LayerNorm.weight']
-    optimizer_grouped_parameters = [
-        {'params': [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)], 'weight_decay': args.weight_decay},
-        {'params': [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
+    if train_highway:
+        optimizer_grouped_parameters = [
+            {'params': [p for n, p in model.named_parameters() if
+                        ("highway" in n) and (not any(nd in n for nd in no_decay))],
+             'weight_decay': args.weight_decay},
+            {'params': [p for n, p in model.named_parameters() if
+                        ("highway" in n) and (any(nd in n for nd in no_decay))],
+             'weight_decay': 0.0}
+        ]
+    else:
+        optimizer_grouped_parameters = [
+            {'params': [p for n, p in model.named_parameters() if
+                        ("highway" not in n) and (not any(nd in n for nd in no_decay))],
+             'weight_decay': args.weight_decay},
+            {'params': [p for n, p in model.named_parameters() if
+                        ("highway" not in n) and (any(nd in n for nd in no_decay))],
+             'weight_decay': 0.0}
         ]
     optimizer = AdamW(optimizer_grouped_parameters, lr=args.learning_rate, eps=args.adam_epsilon)
     scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=args.warmup_steps, num_training_steps=t_total)
@@ -149,6 +164,7 @@ def train(args, train_dataset, model, tokenizer):
                       'labels':         batch[3]}
             if args.model_type != 'distilbert':
                 inputs['token_type_ids'] = batch[2] if args.model_type in ['bert', 'xlnet'] else None  # XLM, DistilBERT and RoBERTa don't use segment_ids
+            inputs['train_highway'] = train_highway
             outputs = model(**inputs)
             loss = outputs[0]  # model outputs are always tuple in transformers (see doc)
 
@@ -208,7 +224,7 @@ def train(args, train_dataset, model, tokenizer):
     return global_step, tr_loss / global_step
 
 
-def evaluate(args, model, tokenizer, prefix=""):
+def evaluate(args, model, tokenizer, prefix="", output_layer=-1):
     # Loop to handle MNLI double evaluation (matched, mis-matched)
     eval_task_names = ("mnli", "mnli-mm") if args.task_name == "mnli" else (args.task_name,)
     eval_outputs_dirs = (args.output_dir, args.output_dir + '-MM') if args.task_name == "mnli" else (args.output_dir,)
@@ -247,6 +263,8 @@ def evaluate(args, model, tokenizer, prefix=""):
                           'labels':         batch[3]}
                 if args.model_type != 'distilbert':
                     inputs['token_type_ids'] = batch[2] if args.model_type in ['bert', 'xlnet'] else None  # XLM, DistilBERT and RoBERTa don't use segment_ids
+                if output_layer >= 0:
+                    inputs['output_layer'] = output_layer
                 outputs = model(**inputs)
                 tmp_eval_loss, logits = outputs[:2]
 
@@ -297,7 +315,7 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False):
         label_list = processor.get_labels()
         if task in ['mnli', 'mnli-mm'] and args.model_type in ['roberta']:
             # HACK(label indices are swapped in RoBERTa pretrained model)
-            label_list[1], label_list[2] = label_list[2], label_list[1] 
+            label_list[1], label_list[2] = label_list[2], label_list[1]
         examples = processor.get_dev_examples(args.data_dir) if evaluate else processor.get_train_examples(args.data_dir)
         features = convert_examples_to_features(examples,
                                                 tokenizer,
@@ -484,6 +502,8 @@ def main():
         global_step, tr_loss = train(args, train_dataset, model, tokenizer)
         logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
+        train(args, train_dataset, model, tokenizer, train_highway=True)
+
 
     # Saving best-practices: if you use defaults names for the model, you can reload it using from_pretrained()
     if args.do_train and (args.local_rank == -1 or torch.distributed.get_rank() == 0):
@@ -519,10 +539,14 @@ def main():
         for checkpoint in checkpoints:
             global_step = checkpoint.split('-')[-1] if len(checkpoints) > 1 else ""
             prefix = checkpoint.split('/')[-1] if checkpoint.find('checkpoint') != -1 else ""
-            
+
             model = model_class.from_pretrained(checkpoint)
             model.to(args.device)
             result = evaluate(args, model, tokenizer, prefix=prefix)
+            for i in range(12):
+                logger.info("\n")
+                _result = evaluate(args, model, tokenizer, prefix=prefix,
+                                   output_layer=i)
             result = dict((k + '_{}'.format(global_step), v) for k, v in result.items())
             results.update(result)
 

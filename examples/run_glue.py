@@ -17,7 +17,6 @@
 
 from __future__ import absolute_import, division, print_function
 
-import time
 import argparse
 import glob
 import logging
@@ -57,7 +56,9 @@ from transformers import glue_output_modes as output_modes
 from transformers import glue_processors as processors
 from transformers import glue_convert_examples_to_features as convert_examples_to_features
 
-logging.basicConfig(filename="logs/logging_out_file"+str(time.time()),
+log_folder = "logs"
+filecount = len([x for x in os.listdir(log_folder) if "log" in x])
+logging.basicConfig(filename="logs/{}.log".format(filecount),
                     filemode='w',
                     level=0)
 logger = logging.getLogger(__name__)

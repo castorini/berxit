@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 from torch import nn
 from torch.nn import CrossEntropyLoss, MSELoss
@@ -358,6 +359,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
     def __init__(self, config):
         super(BertForSequenceClassification, self).__init__(config)
         self.num_labels = config.num_labels
+        self.num_layers = config.num_hidden_layers
 
         self.bert = BertModel(config)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
@@ -366,7 +368,8 @@ class BertForSequenceClassification(BertPreTrainedModel):
         self.init_weights()
 
     def forward(self, input_ids=None, attention_mask=None, token_type_ids=None,
-                position_ids=None, head_mask=None, inputs_embeds=None, labels=None):
+                position_ids=None, head_mask=None, inputs_embeds=None, labels=None,
+                output_layer=-1, train_highway=False):
 
         try:
             outputs = self.bert(input_ids,
@@ -389,6 +392,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
         if not self.training:
             original_entropy = entropy(logits)
             highway_entropy = []
+            highway_logits_all = []
         if labels is not None:
             if self.num_labels == 1:
                 #  We are doing regression
@@ -403,6 +407,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
             for highway_exit in outputs[-1]:
                 highway_logits = highway_exit[0]
                 if not self.training:
+                    highway_logits_all.append(highway_logits)
                     highway_entropy.append(highway_exit[2])
                 if self.num_labels == 1:
                     #  We are doing regression
@@ -415,10 +420,16 @@ class BertForSequenceClassification(BertPreTrainedModel):
                                             labels.view(-1))
                 highway_losses.append(highway_loss)
 
-            # outputs = (highway_losses[-1],) + outputs
-            outputs = (loss + sum(highway_losses),) + outputs
+            if train_highway:
+                outputs = (sum(highway_losses[:-1]),) + outputs
+                # exclude the final highway, of course
+            else:
+                outputs = (loss,) + outputs
         if not self.training:
             outputs = outputs + ((original_entropy, highway_entropy),)
-            outputs = (outputs[0],) + (highway_logits,) + outputs[2:]  ## use the penultimate(?) layer
+            if output_layer >= 0:
+                outputs = (outputs[0],) +\
+                          (highway_logits_all[output_layer],) +\
+                          outputs[2:]  ## use the highway of the last layer
 
         return outputs  # (loss), logits, (hidden_states), (attentions), entropy
