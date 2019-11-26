@@ -22,6 +22,7 @@ import glob
 import logging
 import os
 import random
+import time
 
 import numpy as np
 import torch
@@ -379,6 +380,10 @@ def main():
                         help="Rul evaluation during training at each logging step.")
     parser.add_argument("--do_lower_case", action='store_true',
                         help="Set this flag if you are using an uncased model.")
+    parser.add_argument("--eval_each_highway", action='store_true',
+                        help="Set this flag to evaluate each highway.")
+    parser.add_argument("--eval_after_first_stage", action='store_true',
+                        help="Set this flag to evaluate after training only bert (not highway).")
 
     parser.add_argument("--per_gpu_train_batch_size", default=8, type=int,
                         help="Batch size per GPU/CPU for training.")
@@ -502,6 +507,15 @@ def main():
         global_step, tr_loss = train(args, train_dataset, model, tokenizer)
         logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
+        if args.eval_after_first_stage:
+            start_time = time.time()
+            result = evaluate(args, model, tokenizer, prefix="")
+            print("Eval time: {} s".format(time.time() - start_time))
+            if "f1" in result:
+                print_result = result["f1"]
+            else:
+                print_result = result["acc"]
+
         train(args, train_dataset, model, tokenizer, train_highway=True)
 
 
@@ -542,11 +556,19 @@ def main():
 
             model = model_class.from_pretrained(checkpoint)
             model.to(args.device)
+            start_time = time.time()
             result = evaluate(args, model, tokenizer, prefix=prefix)
-            for i in range(12):
-                logger.info("\n")
-                _result = evaluate(args, model, tokenizer, prefix=prefix,
-                                   output_layer=i)
+            print("Eval time: {} s".format(time.time()-start_time))
+            if "f1" in result:
+                print_result = result["f1"]
+            else:
+                print_result = result["acc"]
+            print("f1: {}".format(print_result))
+            if args.eval_each_highway:
+                for i in range(12):
+                    logger.info("\n")
+                    _result = evaluate(args, model, tokenizer, prefix=prefix,
+                                       output_layer=i)
             result = dict((k + '_{}'.format(global_step), v) for k, v in result.items())
             results.update(result)
 

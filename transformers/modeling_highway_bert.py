@@ -5,6 +5,7 @@ from torch.nn import CrossEntropyLoss, MSELoss
 
 from .modeling_bert import BertLayer, BertLayerNorm, BertPreTrainedModel
 
+
 def entropy(x):
     # x: torch.Tensor, logits BEFORE softmax
     exp_x = torch.exp(x)
