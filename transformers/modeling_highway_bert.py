@@ -61,7 +61,7 @@ class BertEncoder(nn.Module):
         self.layer = nn.ModuleList([BertLayer(config) for _ in range(config.num_hidden_layers)])
         self.highway = nn.ModuleList([BertHighway(config) for _ in range(config.num_hidden_layers)])
 
-        self.early_exit_entropy = [0 for _ in range(config.num_hidden_layers)]
+        self.early_exit_entropy = [-1 for _ in range(config.num_hidden_layers)]
 
     def init_highway_pooler(self, pooler):
         loaded_model = pooler.state_dict()

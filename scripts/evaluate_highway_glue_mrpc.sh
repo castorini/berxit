@@ -7,5 +7,6 @@ python -um examples.run_highway_glue \
     --data_dir /scratch/gobi1/xinji/GLUE/MRPC \
     --output_dir ./saved_models/MRPC-42 \
     --max_seq_length 128 \
-    --per_gpu_eval_batch_size=1 \
-    --eval_each_highway
+    --per_gpu_eval_batch_size=1
+
+#    --eval_each_highway

@@ -10,7 +10,7 @@ python -um examples.run_highway_glue \
     --per_gpu_eval_batch_size=1 \
     --per_gpu_train_batch_size=8 \
     --learning_rate 2e-5 \
-    --num_train_epochs 1.0 \
+    --num_train_epochs 3.0 \
     --overwrite_output_dir \
     --output_dir ./saved_models/debug \
     --save_steps 0 \
