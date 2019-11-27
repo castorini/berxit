@@ -63,6 +63,14 @@ class BertEncoder(nn.Module):
 
         self.early_exit_entropy = [-1 for _ in range(config.num_hidden_layers)]
 
+    def set_early_exit_entropy(self, x):
+        if type(x) is float:
+            for i in range(len(self.early_exit_entropy)):
+                self.early_exit_entropy[i] = x
+        else:
+            # possibly set it as non-uniform
+            pass
+
     def init_highway_pooler(self, pooler):
         loaded_model = pooler.state_dict()
         for highway in self.highway:

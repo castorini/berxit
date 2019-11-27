@@ -1,6 +1,6 @@
-python -um examples.run_highway_glue \
-    --model_type bert \
-    --model_name_or_path bert-base-uncased \
+python -um examples.run_glue \
+    --model_type roberta \
+    --model_name_or_path roberta-base \
     --task_name MRPC \
     --do_train \
     --do_eval \
@@ -12,7 +12,6 @@ python -um examples.run_highway_glue \
     --learning_rate 2e-5 \
     --num_train_epochs 3.0 \
     --overwrite_output_dir \
-    --output_dir ./saved_models/debug \
+    --output_dir ./saved_models/roberta/MRPC-42 \
     --save_steps 0 \
-    --seed 42 \
-    --eval_after_first_stage
+    --seed 42

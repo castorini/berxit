@@ -146,3 +146,6 @@ logging_out_file
 
 # model checkpoints
 saved_models
+
+# temporary script for slurm submission
+slurm_submit.sh

@@ -1,6 +1,6 @@
 python -um examples.run_highway_glue \
-    --model_type bert \
-    --model_name_or_path bert-base-uncased \
+    --model_type roberta \
+    --model_name_or_path roberta-base \
     --task_name SST-2 \
     --do_train \
     --do_eval \
@@ -12,7 +12,7 @@ python -um examples.run_highway_glue \
     --learning_rate 2e-5 \
     --num_train_epochs 3.0 \
     --overwrite_output_dir \
-    --output_dir ./saved_models/SST-2-9102-HW \
+    --output_dir ./saved_models/roberta/SST-2-42-HW \
     --save_steps 0 \
-    --seed 9102 \
+    --seed 42 \
     --eval_after_first_stage

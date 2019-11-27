@@ -405,6 +405,9 @@ def main():
                         help="If > 0: set total number of training steps to perform. Override num_train_epochs.")
     parser.add_argument("--warmup_steps", default=0, type=int,
                         help="Linear warmup over warmup_steps.")
+    parser.add_argument("--early_exit_entropy", default=-1, type=float,
+                        help = "Entropy threshold for early exit.")
+
 
     parser.add_argument('--logging_steps', type=int, default=50,
                         help="Log every X updates steps.")
@@ -491,6 +494,7 @@ def main():
                                         config=config,
                                         cache_dir=args.cache_dir if args.cache_dir else None)
 
+    model.bert.encoder.set_early_exit_entropy(args.early_exit_entropy)
     model.bert.init_highway_pooler()
 
     if args.local_rank == 0:
@@ -555,6 +559,7 @@ def main():
             prefix = checkpoint.split('/')[-1] if checkpoint.find('checkpoint') != -1 else ""
 
             model = model_class.from_pretrained(checkpoint)
+            model.bert.encoder.set_early_exit_entropy(args.early_exit_entropy)
             model.to(args.device)
             start_time = time.time()
             result = evaluate(args, model, tokenizer, prefix=prefix)
@@ -564,7 +569,7 @@ def main():
             else:
                 print_result = result["acc"]
             print("f1: {}".format(print_result))
-            if args.eval_each_highway:
+            if args.early_exit_entropy==-1 and args.eval_each_highway:
                 for i in range(12):
                     logger.info("\n")
                     _result = evaluate(args, model, tokenizer, prefix=prefix,
