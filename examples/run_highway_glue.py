@@ -40,7 +40,6 @@ from tqdm import tqdm, trange
 from transformers import (WEIGHTS_NAME, BertConfig,
                                   BertTokenizer,
                                   RobertaConfig,
-                                  RobertaForSequenceClassification,
                                   RobertaTokenizer,
                                   XLMConfig, XLMForSequenceClassification,
                                   XLMTokenizer, XLNetConfig,
@@ -51,6 +50,7 @@ from transformers import (WEIGHTS_NAME, BertConfig,
                                   DistilBertTokenizer)
 
 from transformers.modeling_highway_bert import BertForSequenceClassification
+from transformers.modeling_highway_roberta import RobertaForSequenceClassification
 
 from transformers import AdamW, get_linear_schedule_with_warmup
 
@@ -494,8 +494,12 @@ def main():
                                         config=config,
                                         cache_dir=args.cache_dir if args.cache_dir else None)
 
-    model.bert.encoder.set_early_exit_entropy(args.early_exit_entropy)
-    model.bert.init_highway_pooler()
+    if args.model_type == "bert":
+        model.bert.encoder.set_early_exit_entropy(args.early_exit_entropy)
+        model.bert.init_highway_pooler()
+    else:
+        model.roberta.encoder.set_early_exit_entropy(args.early_exit_entropy)
+        model.roberta.init_highway_pooler()
 
     if args.local_rank == 0:
         torch.distributed.barrier()  # Make sure only the first process in distributed training will download model & vocab
@@ -559,7 +563,8 @@ def main():
             prefix = checkpoint.split('/')[-1] if checkpoint.find('checkpoint') != -1 else ""
 
             model = model_class.from_pretrained(checkpoint)
-            model.bert.encoder.set_early_exit_entropy(args.early_exit_entropy)
+            if args.model_type=="bert":
+                model.bert.encoder.set_early_exit_entropy(args.early_exit_entropy)
             model.to(args.device)
             start_time = time.time()
             result = evaluate(args, model, tokenizer, prefix=prefix)

@@ -49,6 +49,7 @@ from transformers import (WEIGHTS_NAME, BertConfig,
                                   DistilBertForSequenceClassification,
                                   DistilBertTokenizer)
 
+from transformers.modeling_highway_roberta import RobertaForSequenceClassification
 from transformers import AdamW, get_linear_schedule_with_warmup
 
 from transformers import glue_compute_metrics as compute_metrics
