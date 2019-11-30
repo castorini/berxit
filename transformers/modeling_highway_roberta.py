@@ -65,8 +65,6 @@ class RobertaModel(BertModel):
         self.embeddings.word_embeddings = value
 
 
-
-
 class RobertaForSequenceClassification(BertPreTrainedModel):
     r"""
         **labels**: (`optional`) ``torch.LongTensor`` of shape ``(batch_size,)``:

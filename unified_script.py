@@ -1,4 +1,5 @@
 import sys
+import os
 
 flavor, model, dataset, seed, entropy, inter = sys.argv[1:]
 # flavor: raw, highway, eval_highway
@@ -140,7 +141,7 @@ elif flavor == "highway":
         dataset,
         flavor + '-' + seed
     )
-else:
+elif flavor == "raw":
     script = script_template[flavor].format(
         model[:model.index('-')],
         model + ("-uncased" if "bert-" in model else ""),
@@ -153,9 +154,33 @@ else:
         dataset,
         flavor + '-' + seed
     )
+elif flavor.startswith("entropy"):
+    if inter != "True":
+        print("Entropy must be interactive")
+        exit(1)
+    entropies = flavor[flavor.index(':')+1:].split(',')
+    for curr_entropy in entropies:
+        script = script_template["eval_highway"].format(
+            model[:model.index('-')],
+            model,
+            dataset,
+            'highway-' + seed,
+            dataset,
+            dataset,
+            model,
+            dataset,
+            'highway-' + seed,
+            curr_entropy
+        )
+        # print(script)
+        os.system(script)
+        print("\n")
+    exit(0)
+else:
+    print("Wrong flavor")
+    exit(1)
 
 print(script)
-import os
 if inter == "True":
     # interactive node
     os.system(script)

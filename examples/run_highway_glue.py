@@ -521,8 +521,13 @@ def main():
             print("Eval time: {} s".format(time.time() - start_time))
             if "f1" in result:
                 print_result = result["f1"]
-            else:
+            elif "mcc" in result:
+                print_result = result["mcc"]
+            elif "acc" in result:
                 print_result = result["acc"]
+            else:
+                print(result)
+                exit(1)
 
         train(args, train_dataset, model, tokenizer, train_highway=True)
 
@@ -565,14 +570,21 @@ def main():
             model = model_class.from_pretrained(checkpoint)
             if args.model_type=="bert":
                 model.bert.encoder.set_early_exit_entropy(args.early_exit_entropy)
+            else:
+                model.roberta.encoder.set_early_exit_entropy(args.early_exit_entropy)
             model.to(args.device)
             start_time = time.time()
             result = evaluate(args, model, tokenizer, prefix=prefix)
             print("Eval time: {} s".format(time.time()-start_time))
             if "f1" in result:
                 print_result = result["f1"]
-            else:
+            elif "mcc" in result:
+                print_result = result["mcc"]
+            elif "acc" in result:
                 print_result = result["acc"]
+            else:
+                print(result)
+                exit(1)
             print("f1: {}".format(print_result))
             if args.early_exit_entropy==-1 and args.eval_each_highway:
                 for i in range(12):
