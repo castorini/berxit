@@ -6,6 +6,30 @@ flavor, model, dataset, seed, entropy, inter = sys.argv[1:]
 # model: bert-base, bert-large, roberta-base, roberta-large
 # dataset: MRPC, SST-2, RTE, QNLI
 # seed: 42, 9102, 4396
+# entropy: anything, -1 will evaluate all layers
+
+entropy_selection = {
+    "bert-base": {
+        "MRPC":  "0,0.05,0.1,0.15,0.2,0.3,0.4,0.5",
+        "SST-2": "0,0.001,0.005,0.01,0.05,0.2,0.3,0.4",
+        "QNLI":  "0,0.06,0.1,0.14,0.15,0.2,0.3,0.35",
+        "RTE":   "0,0.2,0.25,0.3,0.35,0.4,0.55,0.6,0.65"
+    },
+    "roberta-base": {
+        "MRPC":  "0,0.05,0.1,0.15,0.2,0.3,0.5,0.55,0.6",
+        "SST-2": "0,0.001,0.01,0.1,0.2,0.3,0.5,0.55,0.6",
+        "QNLI":  "0,0.06,0.1,0.2,0.25,0.45,0.5,0.55",
+        "RTE":   "0,0.2,0.25,0.3,0.5,0.6,0.65"
+    },
+    "bert-large": {
+        "SST-2": "0,0.001,0.005,0.01,0.05,0.2,0.3,0.4,0.5,0.55,0.6"
+    },
+    "roberta-large": {
+        "MRPC":  "0,0.05,0.1,0.15,0.2,0.3,0.5,0.55,0.6",
+        "SST-2": "0,0.001,0.01,0.1,0.2,0.3,0.5,0.55,0.6",
+    }
+}
+
 
 best_learning_rate = {
     "bert-base":{
@@ -78,6 +102,7 @@ script_template = {
     --save_steps 0 \
     --seed {} \
     --output_dir ./saved_models/{}/{}/{} \
+    --overwrite_cache \
     --overwrite_output_dir""",
 
     "highway":
@@ -98,6 +123,7 @@ script_template = {
     --seed {} \
     --output_dir ./saved_models/{}/{}/{} \
     --save_steps 0 \
+    --overwrite_cache \
     --eval_after_first_stage""",
 
     "eval_highway":
@@ -113,6 +139,7 @@ script_template = {
     --eval_each_highway \
     --early_exit_entropy {} \
     --eval_highway \
+    --overwrite_cache \
     --per_gpu_eval_batch_size=1"""
 }
 
@@ -155,11 +182,12 @@ elif flavor == "raw":
         dataset,
         flavor + '-' + seed
     )
-elif flavor.startswith("entropy"):
+elif flavor == "entropy":
     if inter != "True":
         print("Entropy must be interactive")
         exit(1)
-    entropies = flavor[flavor.index(':')+1:].split(',')
+    entropies = entropy_selection[model][dataset].split(',')
+    print(entropies)
     for curr_entropy in entropies:
         script = script_template["eval_highway"].format(
             model[:model.index('-')],

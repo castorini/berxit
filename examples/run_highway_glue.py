@@ -255,6 +255,7 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
         preds = None
         out_label_ids = None
         exit_layer_counter = {(i+1):0 for i in range(model.num_layers)}
+        st = time.time()
         for batch in tqdm(eval_dataloader, desc="Evaluating"):
             model.eval()
             batch = tuple(t.to(args.device) for t in batch)
@@ -280,13 +281,9 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
             else:
                 preds = np.append(preds, logits.detach().cpu().numpy(), axis=0)
                 out_label_ids = np.append(out_label_ids, inputs['labels'].detach().cpu().numpy(), axis=0)
+        eval_time = time.time() - st
+        print("Eval time:", eval_time)
 
-        if eval_highway:
-            print("Exit layer counter", exit_layer_counter)
-            actual_cost = sum([l*c for l, c in exit_layer_counter.items()])
-            full_cost = len(eval_dataloader) * model.num_layers
-            print("Expected saving", actual_cost/full_cost)
-        
         eval_loss = eval_loss / nb_eval_steps
         if args.output_mode == "classification":
             preds = np.argmax(preds, axis=1)
@@ -294,6 +291,29 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
             preds = np.squeeze(preds)
         result = compute_metrics(eval_task, preds, out_label_ids)
         results.update(result)
+
+        if eval_highway:
+            print("Exit layer counter", exit_layer_counter)
+            actual_cost = sum([l*c for l, c in exit_layer_counter.items()])
+            full_cost = len(eval_dataloader) * model.num_layers
+            print("Expected saving", actual_cost/full_cost)
+            if args.early_exit_entropy>=0:
+                save_fname = args.plot_data_dir +\
+                             args.model_name_or_path[2:] +\
+                             "/entropy_{}.npy".format(args.early_exit_entropy)
+                if not os.path.exists(os.path.dirname(save_fname)):
+                    os.makedirs(os.path.dirname(save_fname))
+                if "f1" in result:
+                    print_result = result["f1"]
+                elif "mcc" in result:
+                    print_result = result["mcc"]
+                elif "acc" in result:
+                    print_result = result["acc"]
+                np.save(save_fname,
+                        np.array([exit_layer_counter,
+                                  eval_time,
+                                  actual_cost/full_cost,
+                                  print_result]))
 
         output_eval_file = os.path.join(eval_output_dir, prefix, "eval_results.txt")
         with open(output_eval_file, "w") as writer:
@@ -370,6 +390,8 @@ def main():
                         help="The name of the task to train selected in the list: " + ", ".join(processors.keys()))
     parser.add_argument("--output_dir", default=None, type=str, required=True,
                         help="The output directory where the model predictions and checkpoints will be written.")
+    parser.add_argument("--plot_data_dir", default="./plotting/", type=str, required=False,
+                        help="The directory to store data for plotting figures.")
 
     ## Other parameters
     parser.add_argument("--config_name", default="", type=str,
@@ -527,9 +549,7 @@ def main():
         logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
         if args.eval_after_first_stage:
-            start_time = time.time()
             result = evaluate(args, model, tokenizer, prefix="")
-            print("Eval time: {} s".format(time.time() - start_time))
             if "f1" in result:
                 print_result = result["f1"]
             elif "mcc" in result:
@@ -584,10 +604,8 @@ def main():
             else:
                 model.roberta.encoder.set_early_exit_entropy(args.early_exit_entropy)
             model.to(args.device)
-            start_time = time.time()
             result = evaluate(args, model, tokenizer, prefix=prefix,
                               eval_highway=args.eval_highway)
-            print("Eval time: {} s".format(time.time()-start_time))
             if "f1" in result:
                 print_result = result["f1"]
             elif "mcc" in result:
@@ -599,10 +617,25 @@ def main():
                 exit(1)
             print("f1: {}".format(print_result))
             if args.early_exit_entropy==-1 and args.eval_each_highway:
+                last_layer_results = print_result
+                each_layer_results = []
                 for i in range(model.num_layers):
                     logger.info("\n")
                     _result = evaluate(args, model, tokenizer, prefix=prefix,
                                        output_layer=i, eval_highway=args.eval_highway)
+                    if i+1 < model.num_layers:
+                        if "f1" in result:
+                            each_layer_results.append(_result["f1"])
+                        elif "mcc" in result:
+                            each_layer_results.append(_result["mcc"])
+                        elif "acc" in result:
+                            each_layer_results.append(_result["acc"])
+                each_layer_results.append(last_layer_results)
+                save_fname = args.plot_data_dir + args.model_name_or_path[2:] + "/each_layer.npy"
+                if not os.path.exists(os.path.dirname(save_fname)):
+                    os.makedirs(os.path.dirname(save_fname))
+                np.save(save_fname,
+                        np.array(each_layer_results))
             result = dict((k + '_{}'.format(global_step), v) for k, v in result.items())
             results.update(result)
 
