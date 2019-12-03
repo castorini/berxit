@@ -102,12 +102,18 @@ class BertEncoder(nn.Module):
             if not self.training:
                 highway_logits = highway_exit[0]
                 highway_entropy = entropy(highway_logits)
-                highway_exit = highway_exit + (highway_entropy,)
+                highway_exit = highway_exit + (highway_entropy,)  # logits, hidden_states(?), entropy
                 all_highway_exits = all_highway_exits + (highway_exit,)
 
                 if highway_entropy < self.early_exit_entropy[i]:
+                    # weight_func = lambda x: torch.exp(-3 * x) - 0.5**3
+                    # weight_func = lambda x: 2 - torch.exp(x)
+                    # weighted_logits = \
+                    #     sum([weight_func(x[2]) * x[0] for x in all_highway_exits]) /\
+                    #     sum([weight_func(x[2]) for x in all_highway_exits])
+                    # new_output = (weighted_logits,) + current_outputs[1:] + (all_highway_exits,)
                     new_output = (highway_logits,) + current_outputs[1:] + (all_highway_exits,)
-                    raise HighwayException(new_output)
+                    raise HighwayException(new_output, i+1)
             else:
                 all_highway_exits = all_highway_exits + (highway_exit,)
 
@@ -297,8 +303,9 @@ class BertModel(BertPreTrainedModel):
 
 
 class HighwayException(Exception):
-    def __init__(self, message):
+    def __init__(self, message, exit_layer):
         self.message = message
+        self.exit_layer = exit_layer  # start from 1!
 
 
 class BertHighway(nn.Module):
@@ -379,6 +386,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 position_ids=None, head_mask=None, inputs_embeds=None, labels=None,
                 output_layer=-1, train_highway=False):
 
+        exit_layer = self.num_layers
         try:
             outputs = self.bert(input_ids,
                                 attention_mask=attention_mask,
@@ -395,6 +403,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
             outputs = (logits,) + outputs[2:]  # add hidden states and attention if they are here
         except HighwayException as e:
             outputs = e.message
+            exit_layer = e.exit_layer
             logits = outputs[0]
 
         if not self.training:
@@ -434,10 +443,10 @@ class BertForSequenceClassification(BertPreTrainedModel):
             else:
                 outputs = (loss,) + outputs
         if not self.training:
-            outputs = outputs + ((original_entropy, highway_entropy),)
+            outputs = outputs + ((original_entropy, highway_entropy), exit_layer)
             if output_layer >= 0:
                 outputs = (outputs[0],) +\
                           (highway_logits_all[output_layer],) +\
                           outputs[2:]  ## use the highway of the last layer
 
-        return outputs  # (loss), logits, (hidden_states), (attentions), entropy
+        return outputs  # (loss), logits, (hidden_states), (attentions), (entropies), (exit_layer)

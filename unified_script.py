@@ -112,6 +112,7 @@ script_template = {
     --max_seq_length 128 \
     --eval_each_highway \
     --early_exit_entropy {} \
+    --eval_highway \
     --per_gpu_eval_batch_size=1"""
 }
 

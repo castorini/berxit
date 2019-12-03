@@ -103,6 +103,7 @@ class RobertaForSequenceClassification(BertPreTrainedModel):
     def __init__(self, config):
         super(RobertaForSequenceClassification, self).__init__(config)
         self.num_labels = config.num_labels
+        self.num_layers = config.num_hidden_layers
 
         self.roberta = RobertaModel(config)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
@@ -113,6 +114,7 @@ class RobertaForSequenceClassification(BertPreTrainedModel):
                 labels=None,
                 output_layer=-1, train_highway=False):
 
+        exit_layer = self.num_layers
         try:
             outputs = self.roberta(input_ids,
                                    attention_mask=attention_mask,
@@ -128,6 +130,7 @@ class RobertaForSequenceClassification(BertPreTrainedModel):
             outputs = (logits,) + outputs[2:]  # add hidden states and attention if they are here
         except HighwayException as e:
             outputs = e.message
+            exit_layer = e.exit_layer
             logits = outputs[0]
 
         if not self.training:
@@ -167,7 +170,7 @@ class RobertaForSequenceClassification(BertPreTrainedModel):
             else:
                 outputs = (loss,) + outputs
         if not self.training:
-            outputs = outputs + ((original_entropy, highway_entropy),)
+            outputs = outputs + ((original_entropy, highway_entropy), exit_layer)
             if output_layer >= 0:
                 outputs = (outputs[0],) + \
                           (highway_logits_all[output_layer],) + \

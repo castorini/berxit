@@ -225,7 +225,7 @@ def train(args, train_dataset, model, tokenizer, train_highway=False):
     return global_step, tr_loss / global_step
 
 
-def evaluate(args, model, tokenizer, prefix="", output_layer=-1):
+def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=False):
     # Loop to handle MNLI double evaluation (matched, mis-matched)
     eval_task_names = ("mnli", "mnli-mm") if args.task_name == "mnli" else (args.task_name,)
     eval_outputs_dirs = (args.output_dir, args.output_dir + '-MM') if args.task_name == "mnli" else (args.output_dir,)
@@ -254,6 +254,7 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1):
         nb_eval_steps = 0
         preds = None
         out_label_ids = None
+        exit_layer_counter = {(i+1):0 for i in range(model.num_layers)}
         for batch in tqdm(eval_dataloader, desc="Evaluating"):
             model.eval()
             batch = tuple(t.to(args.device) for t in batch)
@@ -267,6 +268,8 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1):
                 if output_layer >= 0:
                     inputs['output_layer'] = output_layer
                 outputs = model(**inputs)
+                if eval_highway:
+                    exit_layer_counter[outputs[-1]] += 1
                 tmp_eval_loss, logits = outputs[:2]
 
                 eval_loss += tmp_eval_loss.mean().item()
@@ -278,6 +281,12 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1):
                 preds = np.append(preds, logits.detach().cpu().numpy(), axis=0)
                 out_label_ids = np.append(out_label_ids, inputs['labels'].detach().cpu().numpy(), axis=0)
 
+        if eval_highway:
+            print("Exit layer counter", exit_layer_counter)
+            actual_cost = sum([l*c for l, c in exit_layer_counter.items()])
+            full_cost = len(eval_dataloader) * model.num_layers
+            print("Expected saving", actual_cost/full_cost)
+        
         eval_loss = eval_loss / nb_eval_steps
         if args.output_mode == "classification":
             preds = np.argmax(preds, axis=1)
@@ -384,6 +393,8 @@ def main():
                         help="Set this flag to evaluate each highway.")
     parser.add_argument("--eval_after_first_stage", action='store_true',
                         help="Set this flag to evaluate after training only bert (not highway).")
+    parser.add_argument("--eval_highway", action='store_true',
+                        help="Set this flag if it's evaluating highway models")
 
     parser.add_argument("--per_gpu_train_batch_size", default=8, type=int,
                         help="Batch size per GPU/CPU for training.")
@@ -574,7 +585,8 @@ def main():
                 model.roberta.encoder.set_early_exit_entropy(args.early_exit_entropy)
             model.to(args.device)
             start_time = time.time()
-            result = evaluate(args, model, tokenizer, prefix=prefix)
+            result = evaluate(args, model, tokenizer, prefix=prefix,
+                              eval_highway=args.eval_highway)
             print("Eval time: {} s".format(time.time()-start_time))
             if "f1" in result:
                 print_result = result["f1"]
@@ -587,10 +599,10 @@ def main():
                 exit(1)
             print("f1: {}".format(print_result))
             if args.early_exit_entropy==-1 and args.eval_each_highway:
-                for i in range(12):
+                for i in range(model.num_layers):
                     logger.info("\n")
                     _result = evaluate(args, model, tokenizer, prefix=prefix,
-                                       output_layer=i)
+                                       output_layer=i, eval_highway=args.eval_highway)
             result = dict((k + '_{}'.format(global_step), v) for k, v in result.items())
             results.update(result)
 
