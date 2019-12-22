@@ -378,6 +378,19 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False):
     return dataset
 
 
+def get_wanted_result(result):
+    if "f1" in result:
+        print_result = result["f1"]
+    elif "mcc" in result:
+        print_result = result["mcc"]
+    elif "acc" in result:
+        print_result = result["acc"]
+    else:
+        print(result)
+        exit(1)
+    return print_result
+
+
 def main():
     parser = argparse.ArgumentParser()
 
@@ -552,15 +565,8 @@ def main():
 
         if args.eval_after_first_stage:
             result = evaluate(args, model, tokenizer, prefix="")
-            if "f1" in result:
-                print_result = result["f1"]
-            elif "mcc" in result:
-                print_result = result["mcc"]
-            elif "acc" in result:
-                print_result = result["acc"]
-            else:
-                print(result)
-                exit(1)
+            print_result = get_wanted_result(result)
+            print("result: {}".format(print_result))
 
         train(args, train_dataset, model, tokenizer, train_highway=True)
 
@@ -608,16 +614,9 @@ def main():
             model.to(args.device)
             result = evaluate(args, model, tokenizer, prefix=prefix,
                               eval_highway=args.eval_highway)
-            if "f1" in result:
-                print_result = result["f1"]
-            elif "mcc" in result:
-                print_result = result["mcc"]
-            elif "acc" in result:
-                print_result = result["acc"]
-            else:
-                print(result)
-                exit(1)
-            print("f1: {}".format(print_result))
+            print_result = get_wanted_result(result)
+            print("result: {}".format(print_result))
+
             if args.early_exit_entropy==-1 and args.eval_each_highway:
                 last_layer_results = print_result
                 each_layer_results = []
