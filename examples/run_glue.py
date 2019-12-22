@@ -63,6 +63,8 @@ logging.basicConfig(filename="logs/{}.log".format(filecount),
                     filemode='w',
                     level=0)
 logger = logging.getLogger(__name__)
+logger.info("SLURM_JOB_ID: {}".format(os.environ["SLURM_JOB_ID"]))
+logger.info("SLURM_INFO: {}".format([x for x in os.environ.items() if "SLURM" in x[0]]))
 
 ALL_MODELS = sum((tuple(conf.pretrained_config_archive_map.keys()) for conf in (BertConfig, XLNetConfig, XLMConfig, 
                                                                                 RobertaConfig, DistilBertConfig)), ())
