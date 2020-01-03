@@ -23,8 +23,10 @@ import logging
 import os
 import random
 import time
+import datetime
 
 import numpy as np
+import comet_ml as cm
 import torch
 from torch.utils.data import (DataLoader, RandomSampler, SequentialSampler,
                               TensorDataset)
@@ -59,6 +61,12 @@ from transformers import glue_output_modes as output_modes
 from transformers import glue_processors as processors
 from transformers import glue_convert_examples_to_features as convert_examples_to_features
 
+experiment = cm.Experiment(project_name='highway',
+                           log_code=False,
+                           auto_output_logging=False,
+                           parse_args=False,
+                           auto_metric_logging=False)
+
 log_folder = "logs"
 filecount = len([x for x in os.listdir(log_folder) if "log" in x])
 logging.basicConfig(filename="logs/{}.log".format(filecount),
@@ -67,6 +75,11 @@ logging.basicConfig(filename="logs/{}.log".format(filecount),
 logger = logging.getLogger(__name__)
 logger.info("SLURM_JOB_ID: {}".format(os.environ["SLURM_JOB_ID"]))
 logger.info("SLURM_INFO: {}".format([x for x in os.environ.items() if "SLURM" in x[0]]))
+experiment.set_name(str(filecount)+'--'+str(datetime.date.today()))
+experiment.log_parameters({
+    "log_id": filecount,
+    "slurm_id": os.environ["SLURM_JOB_ID"]
+})
 
 ALL_MODELS = sum((tuple(conf.pretrained_config_archive_map.keys()) for conf in (BertConfig, XLNetConfig, XLMConfig,
                                                                                 RobertaConfig, DistilBertConfig)), ())
@@ -86,6 +99,19 @@ def set_seed(args):
     torch.manual_seed(args.seed)
     if args.n_gpu > 0:
         torch.cuda.manual_seed_all(args.seed)
+
+
+def get_wanted_result(result):
+    if "f1" in result:
+        print_result = result["f1"]
+    elif "mcc" in result:
+        print_result = result["mcc"]
+    elif "acc" in result:
+        print_result = result["acc"]
+    else:
+        print(result)
+        exit(1)
+    return print_result
 
 
 def train(args, train_dataset, model, tokenizer, train_highway=False):
@@ -305,17 +331,18 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
                              "/entropy_{}.npy".format(args.early_exit_entropy)
                 if not os.path.exists(os.path.dirname(save_fname)):
                     os.makedirs(os.path.dirname(save_fname))
-                if "f1" in result:
-                    print_result = result["f1"]
-                elif "mcc" in result:
-                    print_result = result["mcc"]
-                elif "acc" in result:
-                    print_result = result["acc"]
+                print_result = get_wanted_result(result)
                 np.save(save_fname,
                         np.array([exit_layer_counter,
                                   eval_time,
                                   actual_cost/full_cost,
                                   print_result]))
+                experiment.log_metrics({
+                    "exit_layer_counter": exit_layer_counter,
+                    "eval_time": eval_time,
+                    "ERS": actual_cost/full_cost,
+                    "result": print_result
+                })
 
         output_eval_file = os.path.join(eval_output_dir, prefix, "eval_results.txt")
         with open(output_eval_file, "w") as writer:
@@ -376,19 +403,6 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False):
 
     dataset = TensorDataset(all_input_ids, all_attention_mask, all_token_type_ids, all_labels)
     return dataset
-
-
-def get_wanted_result(result):
-    if "f1" in result:
-        print_result = result["f1"]
-    elif "mcc" in result:
-        print_result = result["mcc"]
-    elif "acc" in result:
-        print_result = result["acc"]
-    else:
-        print(result)
-        exit(1)
-    return print_result
 
 
 def main():
@@ -483,6 +497,8 @@ def main():
     parser.add_argument('--server_port', type=str, default='', help="For distant debugging.")
     args = parser.parse_args()
 
+    experiment.log_parameters(vars(args))
+
     if os.path.exists(args.output_dir) and os.listdir(args.output_dir) and args.do_train and not args.overwrite_output_dir:
         raise ValueError("Output directory ({}) already exists and is not empty. Use --overwrite_output_dir to overcome.".format(args.output_dir))
 
@@ -567,6 +583,7 @@ def main():
             result = evaluate(args, model, tokenizer, prefix="")
             print_result = get_wanted_result(result)
             print("result: {}".format(print_result))
+            experiment.log_metric("Result after first stage training", print_result)
 
         train(args, train_dataset, model, tokenizer, train_highway=True)
 
@@ -616,6 +633,7 @@ def main():
                               eval_highway=args.eval_highway)
             print_result = get_wanted_result(result)
             print("result: {}".format(print_result))
+            experiment.log_metric("Result after everything", print_result)
 
             if args.early_exit_entropy==-1 and args.eval_each_highway:
                 last_layer_results = print_result
@@ -625,13 +643,9 @@ def main():
                     _result = evaluate(args, model, tokenizer, prefix=prefix,
                                        output_layer=i, eval_highway=args.eval_highway)
                     if i+1 < model.num_layers:
-                        if "f1" in result:
-                            each_layer_results.append(_result["f1"])
-                        elif "mcc" in result:
-                            each_layer_results.append(_result["mcc"])
-                        elif "acc" in result:
-                            each_layer_results.append(_result["acc"])
+                        each_layer_results.append(get_wanted_result(_result))
                 each_layer_results.append(last_layer_results)
+                experiment.log_metric("Each layer result", each_layer_results)
                 save_fname = args.plot_data_dir + args.model_name_or_path[2:] + "/each_layer.npy"
                 if not os.path.exists(os.path.dirname(save_fname)):
                     os.makedirs(os.path.dirname(save_fname))

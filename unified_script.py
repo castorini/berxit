@@ -93,7 +93,7 @@ script_template = {
     --do_train \
     --do_eval \
     --do_lower_case \
-    --data_dir /scratch/gobi1/xinji/GLUE/{} \
+    --data_dir /h/xinji/projects/GLUE/{} \
     --max_seq_length 128 \
     --per_gpu_eval_batch_size 1 \
     --per_gpu_train_batch_size 8 \
@@ -113,7 +113,7 @@ script_template = {
     --do_train \
     --do_eval \
     --do_lower_case \
-    --data_dir /scratch/gobi1/xinji/GLUE/{} \
+    --data_dir /h/xinji/projects/GLUE/{} \
     --max_seq_length 128 \
     --per_gpu_eval_batch_size=1 \
     --per_gpu_train_batch_size=8 \
@@ -133,7 +133,7 @@ script_template = {
     --task_name {} \
     --do_eval \
     --do_lower_case \
-    --data_dir /scratch/gobi1/xinji/GLUE/{} \
+    --data_dir /h/xinji/projects/GLUE/{} \
     --output_dir ./saved_models/{}/{}/{} \
     --max_seq_length 128 \
     --eval_each_highway \
