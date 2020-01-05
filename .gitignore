@@ -149,3 +149,6 @@ saved_models
 
 # temporary script for slurm submission
 slurm_submit.sh
+
+# temporary saved note
+experiment.note

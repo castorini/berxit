@@ -338,11 +338,14 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
                                   actual_cost/full_cost,
                                   print_result]))
                 experiment.log_metrics({
-                    "exit_layer_counter": exit_layer_counter,
                     "eval_time": eval_time,
                     "ERS": actual_cost/full_cost,
                     "result": print_result
                 })
+                experiment.log_other(
+                    "exit_layer_counter",
+                    str(exit_layer_counter),
+                )
 
         output_eval_file = os.path.join(eval_output_dir, prefix, "eval_results.txt")
         with open(output_eval_file, "w") as writer:
@@ -498,6 +501,20 @@ def main():
     args = parser.parse_args()
 
     experiment.log_parameters(vars(args))
+    model_and_size = args.model_name_or_path[
+        args.model_name_or_path.find('saved_models') + 13:]
+    model_and_size = model_and_size[
+        :model_and_size.find('/')
+    ]
+    experiment.log_parameter(
+        "model_and_size",
+        model_and_size
+    )
+    with open("experiment.note") as f:
+        experiment.log_other(
+            "note",
+            f.readline()
+        )
 
     if os.path.exists(args.output_dir) and os.listdir(args.output_dir) and args.do_train and not args.overwrite_output_dir:
         raise ValueError("Output directory ({}) already exists and is not empty. Use --overwrite_output_dir to overcome.".format(args.output_dir))
@@ -633,7 +650,7 @@ def main():
                               eval_highway=args.eval_highway)
             print_result = get_wanted_result(result)
             print("result: {}".format(print_result))
-            experiment.log_metric("Result after everything", print_result)
+            experiment.log_metric("final result", print_result)
 
             if args.early_exit_entropy==-1 and args.eval_each_highway:
                 last_layer_results = print_result
@@ -645,7 +662,9 @@ def main():
                     if i+1 < model.num_layers:
                         each_layer_results.append(get_wanted_result(_result))
                 each_layer_results.append(last_layer_results)
-                experiment.log_metric("Each layer result", each_layer_results)
+                experiment.log_other(
+                    "Each layer result",
+                    ' '.join([str(int(100*x)) for x in each_layer_results]))
                 save_fname = args.plot_data_dir + args.model_name_or_path[2:] + "/each_layer.npy"
                 if not os.path.exists(os.path.dirname(save_fname)):
                     os.makedirs(os.path.dirname(save_fname))
