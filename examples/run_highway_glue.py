@@ -114,7 +114,7 @@ def get_wanted_result(result):
     return print_result
 
 
-def train(args, train_dataset, model, tokenizer, train_highway=False):
+def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
     """ Train the model """
     if args.local_rank in [-1, 0]:
         tb_writer = SummaryWriter()
@@ -131,7 +131,17 @@ def train(args, train_dataset, model, tokenizer, train_highway=False):
 
     # Prepare optimizer and schedule (linear warmup and decay)
     no_decay = ['bias', 'LayerNorm.weight']
-    if train_highway:
+    if train_strategy=='raw':
+        # the original bert model
+        optimizer_grouped_parameters = [
+            {'params': [p for n, p in model.named_parameters() if
+                        ("highway" not in n) and (not any(nd in n for nd in no_decay))],
+             'weight_decay': args.weight_decay},
+            {'params': [p for n, p in model.named_parameters() if
+                        ("highway" not in n) and (any(nd in n for nd in no_decay))],
+             'weight_decay': 0.0}
+        ]
+    elif train_strategy=="only_highway":
         optimizer_grouped_parameters = [
             {'params': [p for n, p in model.named_parameters() if
                         ("highway" in n) and (not any(nd in n for nd in no_decay))],
@@ -140,13 +150,13 @@ def train(args, train_dataset, model, tokenizer, train_highway=False):
                         ("highway" in n) and (any(nd in n for nd in no_decay))],
              'weight_decay': 0.0}
         ]
-    else:
+    elif train_strategy=='all':
         optimizer_grouped_parameters = [
             {'params': [p for n, p in model.named_parameters() if
-                        ("highway" not in n) and (not any(nd in n for nd in no_decay))],
+                       not any(nd in n for nd in no_decay)],
              'weight_decay': args.weight_decay},
             {'params': [p for n, p in model.named_parameters() if
-                        ("highway" not in n) and (any(nd in n for nd in no_decay))],
+                       any(nd in n for nd in no_decay)],
              'weight_decay': 0.0}
         ]
     optimizer = AdamW(optimizer_grouped_parameters, lr=args.learning_rate, eps=args.adam_epsilon)
@@ -193,7 +203,7 @@ def train(args, train_dataset, model, tokenizer, train_highway=False):
                       'labels':         batch[3]}
             if args.model_type != 'distilbert':
                 inputs['token_type_ids'] = batch[2] if args.model_type in ['bert', 'xlnet'] else None  # XLM, DistilBERT and RoBERTa don't use segment_ids
-            inputs['train_highway'] = train_highway
+            inputs['train_strategy'] = train_strategy
             outputs = model(**inputs)
             loss = outputs[0]  # model outputs are always tuple in transformers (see doc)
 
@@ -445,8 +455,6 @@ def main():
                         help="Set this flag if you are using an uncased model.")
     parser.add_argument("--eval_each_highway", action='store_true',
                         help="Set this flag to evaluate each highway.")
-    parser.add_argument("--eval_after_first_stage", action='store_true',
-                        help="Set this flag to evaluate after training only bert (not highway).")
     parser.add_argument("--eval_highway", action='store_true',
                         help="Set this flag if it's evaluating highway models")
 
@@ -472,6 +480,10 @@ def main():
                         help="Linear warmup over warmup_steps.")
     parser.add_argument("--early_exit_entropy", default=-1, type=float,
                         help = "Entropy threshold for early exit.")
+    parser.add_argument("--train_routine",
+                        choices=['raw', 'two_stage', 'all'],
+                        default='raw', type=str,
+                        help = "Training routine (a routine can have mutliple stages, each with different strategies.")
 
 
     parser.add_argument('--logging_steps', type=int, default=50,
@@ -501,19 +513,26 @@ def main():
     args = parser.parse_args()
 
     experiment.log_parameters(vars(args))
-    model_and_size = args.model_name_or_path[
-        args.model_name_or_path.find('saved_models') + 13:]
-    model_and_size = model_and_size[
-        :model_and_size.find('/')
-    ]
+    if 'saved_models' in args.model_name_or_path:
+        model_and_size = args.model_name_or_path[
+            args.model_name_or_path.find('saved_models') + 13:]
+        model_and_size = model_and_size[
+            :model_and_size.find('/')
+        ]
+    else:
+        model_and_size = args.model_name_or_path
     experiment.log_parameter(
         "model_and_size",
         model_and_size
     )
     with open("experiment.note") as f:
+        note = ""
+        for line in f:
+            if not line.startswith('#'):
+                note += line.strip()+' '
         experiment.log_other(
             "note",
-            f.readline()
+            note
         )
 
     if os.path.exists(args.output_dir) and os.listdir(args.output_dir) and args.do_train and not args.overwrite_output_dir:
@@ -593,16 +612,25 @@ def main():
     # Training
     if args.do_train:
         train_dataset = load_and_cache_examples(args, args.task_name, tokenizer, evaluate=False)
-        global_step, tr_loss = train(args, train_dataset, model, tokenizer)
-        logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
-        if args.eval_after_first_stage:
+        if args.train_routine=="raw":
+            global_step, tr_loss = train(args, train_dataset, model, tokenizer)
+            logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
+
+        elif args.train_routine=="two_stage":
+            global_step, tr_loss = train(args, train_dataset, model, tokenizer)
+            logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
             result = evaluate(args, model, tokenizer, prefix="")
             print_result = get_wanted_result(result)
             print("result: {}".format(print_result))
             experiment.log_metric("Result after first stage training", print_result)
 
-        train(args, train_dataset, model, tokenizer, train_highway=True)
+            train(args, train_dataset, model, tokenizer, train_strategy="only_highway")
+
+        elif args.train_routine=='all':
+            global_step, tr_loss = train(args, train_dataset, model, tokenizer,
+                                         train_strategy='all')
+            logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
 
     # Saving best-practices: if you use defaults names for the model, you can reload it using from_pretrained()

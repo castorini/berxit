@@ -1,11 +1,12 @@
 import sys
 import os
 
-flavor, model, dataset, seed, entropy, inter = sys.argv[1:]
-# flavor: raw, highway, eval_highway
+flavor, model, dataset, seed, routine, entropy, inter = sys.argv[1:]
+# flavor: raw, train_highway, eval_highway
 # model: bert-base, bert-large, roberta-base, roberta-large
 # dataset: MRPC, SST-2, RTE, QNLI
 # seed: 42, 9102, 4396
+# routine: raw(?), two_stage(ACL), all(new)
 # entropy: anything, -1 will evaluate all layers
 
 entropy_selection = {
@@ -105,7 +106,7 @@ script_template = {
     --overwrite_cache \
     --overwrite_output_dir""",
 
-    "highway":
+    "train_highway":
         r"""python -um examples.run_highway_glue \
     --model_type {} \
     --model_name_or_path {} \
@@ -124,7 +125,7 @@ script_template = {
     --output_dir ./saved_models/{}/{}/{} \
     --save_steps 0 \
     --overwrite_cache \
-    --eval_after_first_stage""",
+    --train_routine {}""",
 
     "eval_highway":
         r"""python -um examples.run_highway_glue \
@@ -148,15 +149,15 @@ if flavor == "eval_highway":
         model[:model.index('-')],
         model,
         dataset,
-        'highway-' + seed,
+        routine + '-' + seed,
         dataset,
         dataset,
         model,
         dataset,
-        'highway-' + seed,
+        routine + '-' + seed,
         entropy
     )
-elif flavor == "highway":
+elif flavor == "train_highway":
     script = script_template[flavor].format(
         model[:model.index('-')],
         model + ("-uncased" if "bert-" in model else ""),
@@ -167,7 +168,8 @@ elif flavor == "highway":
         seed,
         model,
         dataset,
-        flavor + '-' + seed
+        routine + '-' + seed,
+        routine
     )
 elif flavor == "raw":
     script = script_template[flavor].format(
@@ -193,12 +195,12 @@ elif flavor == "entropy":
             model[:model.index('-')],
             model,
             dataset,
-            'highway-' + seed,
+            routine + '-' + seed,
             dataset,
             dataset,
             model,
             dataset,
-            'highway-' + seed,
+            routine + '-' + seed,
             curr_entropy
         )
         # print(script)

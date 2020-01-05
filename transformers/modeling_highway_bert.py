@@ -384,7 +384,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
 
     def forward(self, input_ids=None, attention_mask=None, token_type_ids=None,
                 position_ids=None, head_mask=None, inputs_embeds=None, labels=None,
-                output_layer=-1, train_highway=False):
+                output_layer=-1, train_strategy='raw'):
 
         exit_layer = self.num_layers
         try:
@@ -437,11 +437,15 @@ class BertForSequenceClassification(BertPreTrainedModel):
                                             labels.view(-1))
                 highway_losses.append(highway_loss)
 
-            if train_highway:
+            if train_strategy=='raw':
+                outputs = (loss,) + outputs
+            elif train_strategy=='only_highway':
                 outputs = (sum(highway_losses[:-1]),) + outputs
                 # exclude the final highway, of course
-            else:
-                outputs = (loss,) + outputs
+            elif train_strategy=='all':
+                outputs = (sum(highway_losses[:-1])+loss,) + outputs
+                # all highways (exclude the final one), plus the original classifier
+
         if not self.training:
             outputs = outputs + ((original_entropy, highway_entropy), exit_layer)
             if output_layer >= 0:
