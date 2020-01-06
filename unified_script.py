@@ -141,7 +141,8 @@ script_template = {
     --early_exit_entropy {} \
     --eval_highway \
     --overwrite_cache \
-    --per_gpu_eval_batch_size=1"""
+    --per_gpu_eval_batch_size=1\
+    --train_routine {}"""
 }
 
 if flavor == "eval_highway":
@@ -155,7 +156,8 @@ if flavor == "eval_highway":
         model,
         dataset,
         routine + '-' + seed,
-        entropy
+        entropy,
+        routine
     )
 elif flavor == "train_highway":
     script = script_template[flavor].format(
