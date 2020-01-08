@@ -68,7 +68,16 @@ experiment = cm.Experiment(project_name='highway',
                            auto_metric_logging=False)
 
 log_folder = "logs"
-filecount = len([x for x in os.listdir(log_folder) if "log" in x])
+existed_experiments = []
+for x in os.listdir(log_folder):
+    num, suffix = x.split('.')
+    if num not in existed_experiments and num.isnumeric():
+        existed_experiments.append(num)
+filecount = len(existed_experiments)
+if os.environ["SLURM_JOB_PARTITION"] != 'interactive':
+    filecount -= 1
+    # exclude its own *.slurm_out
+# filecount = len([x for x in os.listdir(log_folder) if "log" in x])
 logging.basicConfig(filename="logs/{}.log".format(filecount),
                     filemode='w',
                     level=0)
