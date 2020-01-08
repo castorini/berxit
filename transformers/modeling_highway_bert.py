@@ -445,6 +445,22 @@ class BertForSequenceClassification(BertPreTrainedModel):
             elif train_strategy=='all':
                 outputs = (sum(highway_losses[:-1])+loss,) + outputs
                 # all highways (exclude the final one), plus the original classifier
+            elif train_strategy=='self_distil':
+                # the following input_logits are before softmax
+                # final layer logits: logits
+                # logits from layer[i]: outputs[-1][i][0]
+                temperature = 1.0
+                softmax_fct = nn.Softmax(dim=1)
+                teacher_softmax = softmax_fct(logits.detach()) / temperature
+                distil_losses = []
+                for i in range(self.num_layers-1):
+                    student_softmax = softmax_fct(outputs[-1][i][0]) / temperature
+                    distil_losses.append(
+                        - temperature**2 * torch.sum(
+                            teacher_softmax * torch.log(student_softmax))
+                    )
+                outputs = (sum(highway_losses[:-1]) + loss + sum(distil_losses),)\
+                          + outputs
 
         if not self.training:
             outputs = outputs + ((original_entropy, highway_entropy), exit_layer)

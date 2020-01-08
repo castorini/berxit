@@ -137,6 +137,7 @@ script_template = {
     --data_dir /h/xinji/projects/GLUE/{} \
     --output_dir ./saved_models/{}/{}/{} \
     --max_seq_length 128 \
+    --seed {} \
     --eval_each_highway \
     --early_exit_entropy {} \
     --eval_highway \
@@ -156,6 +157,7 @@ if flavor == "eval_highway":
         model,
         dataset,
         routine + '-' + seed,
+        seed,
         entropy,
         routine
     )
@@ -221,4 +223,8 @@ else:
     # submit job
     with open("slurm_submit.sh", 'w') as f:
         print(script, file=f)
-    os.system("python ~/submit.py slurm_submit.sh")
+    if os.environ["HOSTNAME"]=='v':
+        os.system("python ~/v2_submit.py slurm_submit.sh")
+    else:
+        os.system("python ~/submit.py slurm_submit.sh")
+

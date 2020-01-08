@@ -150,7 +150,7 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
                         ("highway" in n) and (any(nd in n for nd in no_decay))],
              'weight_decay': 0.0}
         ]
-    elif train_strategy=='all':
+    elif train_strategy in ['all', 'self_distil']:
         optimizer_grouped_parameters = [
             {'params': [p for n, p in model.named_parameters() if
                        not any(nd in n for nd in no_decay)],
@@ -159,6 +159,8 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
                        any(nd in n for nd in no_decay)],
              'weight_decay': 0.0}
         ]
+
+
     optimizer = AdamW(optimizer_grouped_parameters, lr=args.learning_rate, eps=args.adam_epsilon)
     scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=args.warmup_steps, num_training_steps=t_total)
     if args.fp16:
@@ -481,7 +483,7 @@ def main():
     parser.add_argument("--early_exit_entropy", default=-1, type=float,
                         help = "Entropy threshold for early exit.")
     parser.add_argument("--train_routine",
-                        choices=['raw', 'two_stage', 'all'],
+                        choices=['raw', 'two_stage', 'all', 'self_distil'],
                         default='raw', type=str,
                         help = "Training routine (a routine can have mutliple stages, each with different strategies.")
 
@@ -625,11 +627,17 @@ def main():
             print("result: {}".format(print_result))
             experiment.log_metric("Result after first stage training", print_result)
 
+            #second stage
             train(args, train_dataset, model, tokenizer, train_strategy="only_highway")
 
         elif args.train_routine=='all':
             global_step, tr_loss = train(args, train_dataset, model, tokenizer,
                                          train_strategy='all')
+            logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
+
+        elif args.train_routine=='self_distil':
+            global_step, tr_loss = train(args, train_dataset, model, tokenizer,
+                                         train_strategy="self_distil")
             logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
 
