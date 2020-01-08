@@ -437,13 +437,15 @@ class BertForSequenceClassification(BertPreTrainedModel):
                                             labels.view(-1))
                 highway_losses.append(highway_loss)
 
+
+            # loss (first entry of outputs), is no longer one variable, but a list of them
             if train_strategy=='raw':
-                outputs = (loss,) + outputs
+                outputs = ([loss],) + outputs
             elif train_strategy=='only_highway':
-                outputs = (sum(highway_losses[:-1]),) + outputs
+                outputs = ([sum(highway_losses[:-1])],) + outputs
                 # exclude the final highway, of course
             elif train_strategy=='all':
-                outputs = (sum(highway_losses[:-1])+loss,) + outputs
+                outputs = ([sum(highway_losses[:-1])+loss],) + outputs
                 # all highways (exclude the final one), plus the original classifier
             elif train_strategy=='self_distil':
                 # the following input_logits are before softmax
@@ -459,8 +461,10 @@ class BertForSequenceClassification(BertPreTrainedModel):
                         - temperature**2 * torch.sum(
                             teacher_softmax * torch.log(student_softmax))
                     )
-                outputs = (sum(highway_losses[:-1]) + loss + sum(distil_losses),)\
+                outputs = ([sum(highway_losses[:-1]) + loss + sum(distil_losses)],)\
                           + outputs
+            elif train_strategy=='layer_wise':
+                outputs = (highway_losses[:-1]+[loss],) + outputs
 
         if not self.training:
             outputs = outputs + ((original_entropy, highway_entropy), exit_layer)
