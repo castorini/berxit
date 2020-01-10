@@ -447,6 +447,12 @@ class BertForSequenceClassification(BertPreTrainedModel):
             elif train_strategy=='all':
                 outputs = ([sum(highway_losses[:-1])+loss],) + outputs
                 # all highways (exclude the final one), plus the original classifier
+            elif train_strategy == 'half':
+                half_highway_losses = [
+                    x for i, x in enumerate(highway_losses[:-1]) if i%2==1
+                ]
+                outputs = ([sum(half_highway_losses) + loss],) + outputs
+                # only classifiers on odd-number layers (1,3,5,7,9,...,last)
             elif train_strategy=='self_distil':
                 # the following input_logits are before softmax
                 # final layer logits: logits
@@ -465,6 +471,8 @@ class BertForSequenceClassification(BertPreTrainedModel):
                           + outputs
             elif train_strategy=='layer_wise':
                 outputs = (highway_losses[:-1]+[loss],) + outputs
+            else:
+                raise NotImplementedError("Wrong training strategy!")
 
         if not self.training:
             outputs = outputs + ((original_entropy, highway_entropy), exit_layer)

@@ -159,7 +159,7 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
                         ("highway" in n) and (any(nd in n for nd in no_decay))],
              'weight_decay': 0.0}
         ]
-    elif train_strategy in ['all', 'self_distil']:
+    elif train_strategy in ['all', 'self_distil', 'half']:
         optimizer_grouped_parameters = [
             {'params': [p for n, p in model.named_parameters() if
                        not any(nd in n for nd in no_decay)],
@@ -191,6 +191,8 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
                             any(nd in n for nd in no_decay)],
                  'weight_decay': 0.0}
             ])
+    else:
+        raise NotImplementedError("Wrong training strategy!")
 
     if train_strategy=='layer_wise':
         optimizers = []
@@ -543,7 +545,8 @@ def main():
     parser.add_argument("--early_exit_entropy", default=-1, type=float,
                         help = "Entropy threshold for early exit.")
     parser.add_argument("--train_routine",
-                        choices=['raw', 'two_stage', 'all', 'self_distil', 'layer_wise'],
+                        choices=['raw', 'two_stage', 'all', 'self_distil',
+                                 'layer_wise', 'half'],
                         default='raw', type=str,
                         help = "Training routine (a routine can have mutliple stages, each with different strategies.")
 
@@ -695,6 +698,11 @@ def main():
                                          train_strategy='all')
             logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
+        elif args.train_routine=='half':
+            global_step, tr_loss = train(args, train_dataset, model, tokenizer,
+                                         train_strategy='half')
+            logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
+
         elif args.train_routine=='self_distil':
             global_step, tr_loss = train(args, train_dataset, model, tokenizer,
                                          train_strategy="self_distil")
@@ -712,6 +720,8 @@ def main():
                                          train_strategy="layer_wise")
             logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
+        else:
+            raise NotImplementedError("Wrong training routine!")
 
     # Saving best-practices: if you use defaults names for the model, you can reload it using from_pretrained()
     if args.do_train and (args.local_rank == -1 or torch.distributed.get_rank() == 0):
