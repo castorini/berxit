@@ -159,7 +159,7 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
                         ("highway" in n) and (any(nd in n for nd in no_decay))],
              'weight_decay': 0.0}
         ]
-    elif train_strategy in ['all', 'self_distil', 'half']:
+    elif train_strategy in ['all', 'self_distil', 'half', 'divide']:
         optimizer_grouped_parameters = [
             {'params': [p for n, p in model.named_parameters() if
                        not any(nd in n for nd in no_decay)],
@@ -546,7 +546,7 @@ def main():
                         help = "Entropy threshold for early exit.")
     parser.add_argument("--train_routine",
                         choices=['raw', 'two_stage', 'all', 'self_distil',
-                                 'layer_wise', 'half'],
+                                 'layer_wise', 'half', 'divide'],
                         default='raw', type=str,
                         help = "Training routine (a routine can have mutliple stages, each with different strategies.")
 
@@ -651,6 +651,12 @@ def main():
                                           num_labels=num_labels,
                                           finetuning_task=args.task_name,
                                           cache_dir=args.cache_dir if args.cache_dir else None)
+
+    if args.train_routine=='divide':
+        config.divide = True
+    else:
+        config.divide = False
+
     tokenizer = tokenizer_class.from_pretrained(args.tokenizer_name if args.tokenizer_name else args.model_name_or_path,
                                                 do_lower_case=args.do_lower_case,
                                                 cache_dir=args.cache_dir if args.cache_dir else None)
@@ -718,6 +724,11 @@ def main():
 
             global_step, tr_loss = train(args, train_dataset, model, tokenizer,
                                          train_strategy="layer_wise")
+            logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
+
+        elif args.train_routine=='divide':
+            global_step, tr_loss = train(args, train_dataset, model, tokenizer,
+                                         train_strategy='divide')
             logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
         else:

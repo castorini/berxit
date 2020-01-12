@@ -59,6 +59,14 @@ class BertEncoder(nn.Module):
         self.output_hidden_states = config.output_hidden_states
         self.layer = nn.ModuleList([BertLayer(config) for _ in range(config.num_hidden_layers)])
         self.highway = nn.ModuleList([BertHighway(config) for _ in range(config.num_hidden_layers)])
+        self.divide = config.divide
+        if self.divide:
+            self.mask = nn.Parameter(
+                torch.Tensor(
+                    [1 for _ in range(config.hidden_size//2)]+
+                    [0 for _ in range(config.hidden_size//2)]),
+                requires_grad=False
+            )
 
         self.early_exit_entropy = [-1 for _ in range(config.num_hidden_layers)]
 
@@ -96,7 +104,12 @@ class BertEncoder(nn.Module):
             if self.output_attentions:
                 current_outputs = current_outputs + (all_attentions,)
 
-            highway_exit = self.highway[i](current_outputs)
+            if self.divide:
+                highway_exit = self.highway[i](
+                    (current_outputs[0]*self.mask,) + current_outputs[1:]
+                )
+            else:
+                highway_exit = self.highway[i](current_outputs)
             # logits, pooled_output
 
             if not self.training:
@@ -444,7 +457,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
             elif train_strategy=='only_highway':
                 outputs = ([sum(highway_losses[:-1])],) + outputs
                 # exclude the final highway, of course
-            elif train_strategy=='all':
+            elif train_strategy in ['all', 'divide']:
                 outputs = ([sum(highway_losses[:-1])+loss],) + outputs
                 # all highways (exclude the final one), plus the original classifier
             elif train_strategy == 'half':
