@@ -159,7 +159,8 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
                         ("highway" in n) and (any(nd in n for nd in no_decay))],
              'weight_decay': 0.0}
         ]
-    elif train_strategy in ['all', 'self_distil', 'half', 'divide', 'neigh_distil']:
+    elif train_strategy in ['all', 'self_distil', 'half', 'divide',
+                            'neigh_distil', 'half-pre_distil']:
         optimizer_grouped_parameters = [
             {'params': [p for n, p in model.named_parameters() if
                        not any(nd in n for nd in no_decay)],
@@ -546,7 +547,8 @@ def main():
                         help = "Entropy threshold for early exit.")
     parser.add_argument("--train_routine",
                         choices=['raw', 'two_stage', 'all', 'self_distil',
-                                 'layer_wise', 'half', 'divide', 'neigh_distil'],
+                                 'layer_wise', 'half', 'divide', 'neigh_distil',
+                                 'half-pre_distil'],
                         default='raw', type=str,
                         help = "Training routine (a routine can have mutliple stages, each with different strategies.")
 
@@ -734,6 +736,11 @@ def main():
         elif args.train_routine=='divide':
             global_step, tr_loss = train(args, train_dataset, model, tokenizer,
                                          train_strategy='divide')
+            logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
+
+        elif args.train_routine=='half-pre_distil':
+            global_step, tr_loss = train(args, train_dataset, model, tokenizer,
+                                         train_strategy='half-pre_distil')
             logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
         else:

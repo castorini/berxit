@@ -497,6 +497,24 @@ class BertForSequenceClassification(BertPreTrainedModel):
                     )
                 outputs = ([sum(highway_losses[:-1]) + loss + sum(distil_losses)],)\
                           + outputs
+            elif train_strategy=='half-pre_distil':
+                # the following input_logits are before softmax
+                # hidden_state after layer[i]: outputs[-1][i][1]
+                teacher_hidden = outputs[-1][-1][1].detach()
+                distil_losses = []
+                for i in range(self.num_layers-1):
+                    if i%2==1:
+                        student_hidden = outputs[-1][i][1]
+                        distil_losses.append(
+                            torch.sum((teacher_hidden-student_hidden) ** 2) * 1e-3
+                        )
+                half_highway_losses = [
+                    x for i, x in enumerate(highway_losses[:-1]) if i%2==1
+                ]
+                outputs = ([sum(half_highway_losses) + loss + sum(distil_losses)],)\
+                          + outputs
+                # breakpoint()
+
             elif train_strategy=='layer_wise':
                 outputs = (highway_losses[:-1]+[loss],) + outputs
             else:
