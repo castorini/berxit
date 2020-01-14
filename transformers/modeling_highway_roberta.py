@@ -181,6 +181,21 @@ class RobertaForSequenceClassification(BertPreTrainedModel):
                 ]
                 outputs = ([sum(half_highway_losses) + loss],) + outputs
                 # only classifiers on odd-number layers (1,3,5,7,9,...,last)
+            elif train_strategy=='neigh_distil':
+                # the following input_logits are before softmax
+                # logits from layer[i]: outputs[-1][i][0]
+                temperature = 1.0
+                softmax_fct = nn.Softmax(dim=1)
+                distil_losses = []
+                for i in range(self.num_layers-1):
+                    teacher_softmax = softmax_fct(outputs[-1][i+1][0].detach()) / temperature
+                    student_softmax = softmax_fct(outputs[-1][i][0]) / temperature
+                    distil_losses.append(
+                        - temperature**2 * torch.sum(
+                            teacher_softmax * torch.log(student_softmax))
+                    )
+                outputs = ([sum(highway_losses[:-1]) + loss + sum(distil_losses)],)\
+                          + outputs
             elif train_strategy == 'self_distil':
                 # the following input_logits are before softmax
                 # final layer logits: logits

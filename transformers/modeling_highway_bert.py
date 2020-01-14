@@ -59,14 +59,17 @@ class BertEncoder(nn.Module):
         self.output_hidden_states = config.output_hidden_states
         self.layer = nn.ModuleList([BertLayer(config) for _ in range(config.num_hidden_layers)])
         self.highway = nn.ModuleList([BertHighway(config) for _ in range(config.num_hidden_layers)])
-        self.divide = config.divide
-        if self.divide:
-            self.mask = nn.Parameter(
-                torch.Tensor(
-                    [1 for _ in range(config.hidden_size//2)]+
-                    [0 for _ in range(config.hidden_size//2)]),
-                requires_grad=False
-            )
+        try:
+            self.divide = config.divide
+            if self.divide:
+                self.mask = nn.Parameter(
+                    torch.Tensor(
+                        [1 for _ in range(config.hidden_size//2)]+
+                        [0 for _ in range(config.hidden_size//2)]),
+                    requires_grad=False
+                )
+        except AttributeError:
+            self.divide = False
 
         self.early_exit_entropy = [-1 for _ in range(config.num_hidden_layers)]
 
