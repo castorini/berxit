@@ -84,7 +84,7 @@ logging.basicConfig(filename="logs/{}.log".format(filecount),
 logger = logging.getLogger(__name__)
 logger.info("SLURM_JOB_ID: {}".format(os.environ["SLURM_JOB_ID"]))
 logger.info("SLURM_INFO: {}".format([x for x in os.environ.items() if "SLURM" in x[0]]))
-experiment.set_name(str(filecount)+'--'+str(datetime.date.today()))
+experiment.set_name(str(filecount) + '--' + str(datetime.date.today()))
 experiment.log_parameters({
     "log_id": filecount,
     "slurm_id": os.environ["SLURM_JOB_ID"]
@@ -140,7 +140,7 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
 
     # Prepare optimizer and schedule (linear warmup and decay)
     no_decay = ['bias', 'LayerNorm.weight']
-    if train_strategy=='raw':
+    if train_strategy == 'raw':
         # the original bert model
         optimizer_grouped_parameters = [
             {'params': [p for n, p in model.named_parameters() if
@@ -150,7 +150,7 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
                         ("highway" not in n) and (any(nd in n for nd in no_decay))],
              'weight_decay': 0.0}
         ]
-    elif train_strategy=="only_highway":
+    elif train_strategy == "only_highway":
         optimizer_grouped_parameters = [
             {'params': [p for n, p in model.named_parameters() if
                         ("highway" in n) and (not any(nd in n for nd in no_decay))],
@@ -160,29 +160,30 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
              'weight_decay': 0.0}
         ]
     elif train_strategy in ['all', 'self_distil', 'half', 'divide',
-                            'neigh_distil', 'half-pre_distil', 'half-distil']:
+                            'neigh_distil', 'half-pre_distil', 'half-distil',
+                            'cascade']:
         optimizer_grouped_parameters = [
             {'params': [p for n, p in model.named_parameters() if
-                       not any(nd in n for nd in no_decay)],
+                        not any(nd in n for nd in no_decay)],
              'weight_decay': args.weight_decay},
             {'params': [p for n, p in model.named_parameters() if
-                       any(nd in n for nd in no_decay)],
+                        any(nd in n for nd in no_decay)],
              'weight_decay': 0.0}
         ]
-    elif train_strategy=='layer_wise':
+    elif train_strategy == 'layer_wise':
         optimizer_parameters_lst = []
         for i in range(model.num_layers):
             layer_parameters = []
             for n, p in model.named_parameters():
-                if i==0 and (n.startswith("bert.embeddings")
-                          or "layer.0." in n
-                          or "highway.0." in n):
+                if i == 0 and (n.startswith("bert.embeddings")
+                               or "layer.0." in n
+                               or "highway.0." in n):
                     layer_parameters.append((n, p))
-                if i>0 and i<model.num_layers-1 and '.'+str(i)+'.' in n:
+                if i > 0 and i < model.num_layers - 1 and '.' + str(i) + '.' in n:
                     layer_parameters.append((n, p))
-                if i==model.num_layers-1 and (n.startswith("bert.pooler")
-                                           or n.startswith("classifier")
-                                           or "layer.{}.".format(model.num_layers-1) in n):
+                if i == model.num_layers - 1 and (n.startswith("bert.pooler")
+                                                  or n.startswith("classifier")
+                                                  or "layer.{}.".format(model.num_layers - 1) in n):
                     layer_parameters.append((n, p))
             optimizer_parameters_lst.append([
                 {'params': [p for n, p in layer_parameters if
@@ -195,7 +196,7 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
     else:
         raise NotImplementedError("Wrong training strategy!")
 
-    if train_strategy=='layer_wise':
+    if train_strategy == 'layer_wise':
         optimizers = []
         for i in range(model.num_layers):
             optimizers.append(
@@ -203,12 +204,13 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
             )
     else:
         optimizers = [AdamW(optimizer_grouped_parameters, lr=args.learning_rate, eps=args.adam_epsilon)]
-    if len(optimizers)==1:
+    if len(optimizers) == 1:
         optimizer = optimizers[0]
     else:
         optimizer = optimizers[-1]
 
-    scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=args.warmup_steps, num_training_steps=t_total)
+    scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=args.warmup_steps,
+                                                num_training_steps=t_total)
 
     if args.fp16:
         # haven't fixed for multiple optimizers yet!
@@ -234,7 +236,8 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
     logger.info("  Num Epochs = %d", args.num_train_epochs)
     logger.info("  Instantaneous batch size per GPU = %d", args.per_gpu_train_batch_size)
     logger.info("  Total train batch size (w. parallel, distributed & accumulation) = %d",
-                   args.train_batch_size * args.gradient_accumulation_steps * (torch.distributed.get_world_size() if args.local_rank != -1 else 1))
+                args.train_batch_size * args.gradient_accumulation_steps * (
+                    torch.distributed.get_world_size() if args.local_rank != -1 else 1))
     logger.info("  Gradient Accumulation steps = %d", args.gradient_accumulation_steps)
     logger.info("  Total optimization steps = %d", t_total)
 
@@ -243,17 +246,25 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
     model.zero_grad()
     train_iterator = trange(int(args.num_train_epochs), desc="Epoch", disable=args.local_rank not in [-1, 0])
     set_seed(args)  # Added here for reproductibility (even between python 2 and 3)
-    for _ in train_iterator:
+
+    if not os.path.exists(args.output_dir) and args.local_rank in [-1, 0]:
+        os.makedirs(args.output_dir)
+    fout = open(args.output_dir + "/layer_example_counter", 'w')
+
+    for epoch_num in train_iterator:
         epoch_iterator = tqdm(train_dataloader, desc="Iteration", disable=args.local_rank not in [-1, 0])
+        layer_example_counter = {i: 0 for i in range(model.num_layers + 1)}
         for step, batch in enumerate(epoch_iterator):
             model.train()
             batch = tuple(t.to(args.device) for t in batch)
-            inputs = {'input_ids':      batch[0],
+            inputs = {'input_ids': batch[0],
                       'attention_mask': batch[1],
-                      'labels':         batch[3]}
+                      'labels': batch[3]}
             if args.model_type != 'distilbert':
-                inputs['token_type_ids'] = batch[2] if args.model_type in ['bert', 'xlnet'] else None  # XLM, DistilBERT and RoBERTa don't use segment_ids
+                inputs['token_type_ids'] = batch[2] if args.model_type in ['bert',
+                                                                           'xlnet'] else None  # XLM, DistilBERT and RoBERTa don't use segment_ids
             inputs['train_strategy'] = train_strategy
+            inputs['layer_example_counter'] = layer_example_counter
             outputs = model(**inputs)
             losses = outputs[0]  # model outputs are always tuple in transformers (see doc)
 
@@ -263,7 +274,7 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
                 optimizer = optimizers[i]
 
                 if args.n_gpu > 1:
-                    loss = loss.mean() # mean() to average on multi-gpu parallel training
+                    loss = loss.mean()  # mean() to average on multi-gpu parallel training
                 if args.gradient_accumulation_steps > 1:
                     loss = loss / args.gradient_accumulation_steps
 
@@ -281,15 +292,15 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
                         torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
 
                     optimizer.step()
-                    if i == len(losses)-1:
+                    if i == len(losses) - 1:
                         scheduler.step()  # Update learning rate schedule
                         global_step += 1
                     model.zero_grad()
 
                     # this block doesn't work as expected any more
                     # but it only affects tensorboard (which i don't care)
-                    if args.local_rank in [-1, 0]\
-                            and args.logging_steps > 0\
+                    if args.local_rank in [-1, 0] \
+                            and args.logging_steps > 0 \
                             and global_step % args.logging_steps == 0:
                         # Log metrics
                         if args.local_rank == -1 and args.evaluate_during_training:  # Only evaluate when single GPU otherwise metrics may not average well
@@ -297,19 +308,20 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
                             for key, value in results.items():
                                 tb_writer.add_scalar('eval_{}'.format(key), value, global_step)
                         tb_writer.add_scalar('lr', scheduler.get_lr()[0], global_step)
-                        tb_writer.add_scalar('loss', (tr_loss - logging_loss)/args.logging_steps, global_step)
+                        tb_writer.add_scalar('loss', (tr_loss - logging_loss) / args.logging_steps, global_step)
                         logging_loss = tr_loss
 
                     # this if block won't be executed
-                    if args.local_rank in [-1, 0]\
-                            and i==0\
-                            and args.save_steps > 0\
+                    if args.local_rank in [-1, 0] \
+                            and i == 0 \
+                            and args.save_steps > 0 \
                             and global_step % args.save_steps == 0:
                         # Save model checkpoint
                         output_dir = os.path.join(args.output_dir, 'checkpoint-{}'.format(global_step))
                         if not os.path.exists(output_dir):
                             os.makedirs(output_dir)
-                        model_to_save = model.module if hasattr(model, 'module') else model  # Take care of distributed/parallel training
+                        model_to_save = model.module if hasattr(model,
+                                                                'module') else model  # Take care of distributed/parallel training
                         model_to_save.save_pretrained(output_dir)
                         torch.save(args, os.path.join(output_dir, 'training_args.bin'))
                         logger.info("Saving model checkpoint to %s", output_dir)
@@ -317,10 +329,17 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
             if args.max_steps > 0 and global_step > args.max_steps:
                 epoch_iterator.close()
                 break
+
+        counter_string = str(layer_example_counter[0]) + ' ' + \
+            ' '.join([
+                str(int(layer_example_counter[i+1].cpu().item()/layer_example_counter[0]*100))[:2]
+                for i in range(model.num_layers)])
+        print(counter_string, file=fout)
+
         if args.max_steps > 0 and global_step > args.max_steps:
             train_iterator.close()
             break
-
+    fout.close()
     if args.local_rank in [-1, 0]:
         tb_writer.close()
 
@@ -356,18 +375,19 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
         nb_eval_steps = 0
         preds = None
         out_label_ids = None
-        exit_layer_counter = {(i+1):0 for i in range(model.num_layers)}
+        exit_layer_counter = {(i + 1): 0 for i in range(model.num_layers)}
         st = time.time()
         for batch in tqdm(eval_dataloader, desc="Evaluating"):
             model.eval()
             batch = tuple(t.to(args.device) for t in batch)
 
             with torch.no_grad():
-                inputs = {'input_ids':      batch[0],
+                inputs = {'input_ids': batch[0],
                           'attention_mask': batch[1],
-                          'labels':         batch[3]}
+                          'labels': batch[3]}
                 if args.model_type != 'distilbert':
-                    inputs['token_type_ids'] = batch[2] if args.model_type in ['bert', 'xlnet'] else None  # XLM, DistilBERT and RoBERTa don't use segment_ids
+                    inputs['token_type_ids'] = batch[2] if args.model_type in ['bert',
+                                                                               'xlnet'] else None  # XLM, DistilBERT and RoBERTa don't use segment_ids
                 if output_layer >= 0:
                     inputs['output_layer'] = output_layer
                 outputs = model(**inputs)
@@ -397,12 +417,12 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
 
         if eval_highway:
             print("Exit layer counter", exit_layer_counter)
-            actual_cost = sum([l*c for l, c in exit_layer_counter.items()])
+            actual_cost = sum([l * c for l, c in exit_layer_counter.items()])
             full_cost = len(eval_dataloader) * model.num_layers
-            print("Expected saving", actual_cost/full_cost)
-            if args.early_exit_entropy>=0:
-                save_fname = args.plot_data_dir +\
-                             args.model_name_or_path[2:] +\
+            print("Expected saving", actual_cost / full_cost)
+            if args.early_exit_entropy >= 0:
+                save_fname = args.plot_data_dir + \
+                             args.model_name_or_path[2:] + \
                              "/entropy_{}.npy".format(args.early_exit_entropy)
                 if not os.path.exists(os.path.dirname(save_fname)):
                     os.makedirs(os.path.dirname(save_fname))
@@ -410,11 +430,11 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
                 np.save(save_fname,
                         np.array([exit_layer_counter,
                                   eval_time,
-                                  actual_cost/full_cost,
+                                  actual_cost / full_cost,
                                   print_result]))
                 experiment.log_metrics({
                     "eval_time": eval_time,
-                    "ERS": actual_cost/full_cost,
+                    "ERS": actual_cost / full_cost,
                     "result": print_result
                 })
                 experiment.log_other(
@@ -453,16 +473,18 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False):
         if task in ['mnli', 'mnli-mm'] and args.model_type in ['roberta']:
             # HACK(label indices are swapped in RoBERTa pretrained model)
             label_list[1], label_list[2] = label_list[2], label_list[1]
-        examples = processor.get_dev_examples(args.data_dir) if evaluate else processor.get_train_examples(args.data_dir)
+        examples = processor.get_dev_examples(args.data_dir) if evaluate else processor.get_train_examples(
+            args.data_dir)
         features = convert_examples_to_features(examples,
                                                 tokenizer,
                                                 label_list=label_list,
                                                 max_length=args.max_seq_length,
                                                 output_mode=output_mode,
-                                                pad_on_left=bool(args.model_type in ['xlnet']),                 # pad on the left for xlnet
+                                                pad_on_left=bool(args.model_type in ['xlnet']),
+                                                # pad on the left for xlnet
                                                 pad_token=tokenizer.convert_tokens_to_ids([tokenizer.pad_token])[0],
                                                 pad_token_segment_id=4 if args.model_type in ['xlnet'] else 0,
-        )
+                                                )
         if args.local_rank in [-1, 0]:
             logger.info("Saving features into cached file %s", cached_features_file)
             torch.save(features, cached_features_file)
@@ -492,7 +514,8 @@ def main():
     parser.add_argument("--model_type", default=None, type=str, required=True,
                         help="Model type selected in the list: " + ", ".join(MODEL_CLASSES.keys()))
     parser.add_argument("--model_name_or_path", default=None, type=str, required=True,
-                        help="Path to pre-trained model or shortcut name selected in the list: " + ", ".join(ALL_MODELS))
+                        help="Path to pre-trained model or shortcut name selected in the list: " + ", ".join(
+                            ALL_MODELS))
     parser.add_argument("--task_name", default=None, type=str, required=True,
                         help="The name of the task to train selected in the list: " + ", ".join(processors.keys()))
     parser.add_argument("--output_dir", default=None, type=str, required=True,
@@ -544,14 +567,13 @@ def main():
     parser.add_argument("--warmup_steps", default=0, type=int,
                         help="Linear warmup over warmup_steps.")
     parser.add_argument("--early_exit_entropy", default=-1, type=float,
-                        help = "Entropy threshold for early exit.")
+                        help="Entropy threshold for early exit.")
     parser.add_argument("--train_routine",
                         choices=['raw', 'two_stage', 'all', 'self_distil',
                                  'layer_wise', 'half', 'divide', 'neigh_distil',
-                                 'half-pre_distil', 'half-distil'],
+                                 'half-pre_distil', 'half-distil', 'cascade'],
                         default='raw', type=str,
-                        help = "Training routine (a routine can have mutliple stages, each with different strategies.")
-
+                        help="Training routine (a routine can have mutliple stages, each with different strategies.")
 
     parser.add_argument('--logging_steps', type=int, default=50,
                         help="Log every X updates steps.")
@@ -582,10 +604,10 @@ def main():
     experiment.log_parameters(vars(args))
     if 'saved_models' in args.model_name_or_path:
         model_and_size = args.model_name_or_path[
-            args.model_name_or_path.find('saved_models') + 13:]
+                         args.model_name_or_path.find('saved_models') + 13:]
         model_and_size = model_and_size[
-            :model_and_size.find('/')
-        ]
+                         :model_and_size.find('/')
+                         ]
     else:
         model_and_size = args.model_name_or_path
     experiment.log_parameter(
@@ -596,14 +618,17 @@ def main():
         note = ""
         for line in f:
             if not line.startswith('#'):
-                note += line.strip()+' '
+                note += line.strip() + ' '
         experiment.log_other(
             "note",
             note
         )
 
-    if os.path.exists(args.output_dir) and os.listdir(args.output_dir) and args.do_train and not args.overwrite_output_dir:
-        raise ValueError("Output directory ({}) already exists and is not empty. Use --overwrite_output_dir to overcome.".format(args.output_dir))
+    if os.path.exists(args.output_dir) and os.listdir(
+            args.output_dir) and args.do_train and not args.overwrite_output_dir:
+        raise ValueError(
+            "Output directory ({}) already exists and is not empty. Use --overwrite_output_dir to overcome.".format(
+                args.output_dir))
 
     # Setup distant debugging if needed
     if args.server_ip and args.server_port:
@@ -625,11 +650,11 @@ def main():
     args.device = device
 
     # Setup logging
-    logging.basicConfig(format = '%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
-                        datefmt = '%m/%d/%Y %H:%M:%S',
-                        level = logging.INFO if args.local_rank in [-1, 0] else logging.WARN)
+    logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
+                        datefmt='%m/%d/%Y %H:%M:%S',
+                        level=logging.INFO if args.local_rank in [-1, 0] else logging.WARN)
     logger.warning("Process rank: %s, device: %s, n_gpu: %s, distributed training: %s, 16-bits training: %s",
-                    args.local_rank, device, args.n_gpu, bool(args.local_rank != -1), args.fp16)
+                   args.local_rank, device, args.n_gpu, bool(args.local_rank != -1), args.fp16)
 
     # Set seed
     set_seed(args)
@@ -654,7 +679,7 @@ def main():
                                           finetuning_task=args.task_name,
                                           cache_dir=args.cache_dir if args.cache_dir else None)
 
-    if args.train_routine=='divide':
+    if args.train_routine == 'divide':
         config.divide = True
     else:
         config.divide = False
@@ -681,16 +706,15 @@ def main():
 
     logger.info("Training/evaluation parameters %s", args)
 
-
     # Training
     if args.do_train:
         train_dataset = load_and_cache_examples(args, args.task_name, tokenizer, evaluate=False)
 
-        if args.train_routine=="raw":
+        if args.train_routine == "raw":
             global_step, tr_loss = train(args, train_dataset, model, tokenizer)
             logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
-        elif args.train_routine=="two_stage":
+        elif args.train_routine == "two_stage":
             global_step, tr_loss = train(args, train_dataset, model, tokenizer)
             logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
             result = evaluate(args, model, tokenizer, prefix="")
@@ -698,30 +722,30 @@ def main():
             print("result: {}".format(print_result))
             experiment.log_metric("Result after first stage training", print_result)
 
-            #second stage
+            # second stage
             train(args, train_dataset, model, tokenizer, train_strategy="only_highway")
 
-        elif args.train_routine=='all':
+        elif args.train_routine == 'all':
             global_step, tr_loss = train(args, train_dataset, model, tokenizer,
                                          train_strategy='all')
             logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
-        elif args.train_routine=='half':
+        elif args.train_routine == 'half':
             global_step, tr_loss = train(args, train_dataset, model, tokenizer,
                                          train_strategy='half')
             logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
-        elif args.train_routine=='self_distil':
+        elif args.train_routine == 'self_distil':
             global_step, tr_loss = train(args, train_dataset, model, tokenizer,
                                          train_strategy="self_distil")
             logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
-        elif args.train_routine=='neigh_distil':
+        elif args.train_routine == 'neigh_distil':
             global_step, tr_loss = train(args, train_dataset, model, tokenizer,
                                          train_strategy="neigh_distil")
             logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
-        elif args.train_routine=='layer_wise':
+        elif args.train_routine == 'layer_wise':
             global_step, tr_loss = train(args, train_dataset, model, tokenizer)
             logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
             result = evaluate(args, model, tokenizer, prefix="")
@@ -733,19 +757,24 @@ def main():
                                          train_strategy="layer_wise")
             logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
-        elif args.train_routine=='divide':
+        elif args.train_routine == 'divide':
             global_step, tr_loss = train(args, train_dataset, model, tokenizer,
                                          train_strategy='divide')
             logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
-        elif args.train_routine=='half-pre_distil':
+        elif args.train_routine == 'half-pre_distil':
             global_step, tr_loss = train(args, train_dataset, model, tokenizer,
                                          train_strategy='half-pre_distil')
             logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
-        elif args.train_routine=='half-distil':
+        elif args.train_routine == 'half-distil':
             global_step, tr_loss = train(args, train_dataset, model, tokenizer,
                                          train_strategy='half-distil')
+            logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
+
+        elif args.train_routine == 'cascade':
+            global_step, tr_loss = train(args, train_dataset, model, tokenizer,
+                                         train_strategy='cascade')
             logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
         else:
@@ -760,7 +789,8 @@ def main():
         logger.info("Saving model checkpoint to %s", args.output_dir)
         # Save a trained model, configuration and tokenizer using `save_pretrained()`.
         # They can then be reloaded using `from_pretrained()`
-        model_to_save = model.module if hasattr(model, 'module') else model  # Take care of distributed/parallel training
+        model_to_save = model.module if hasattr(model,
+                                                'module') else model  # Take care of distributed/parallel training
         model_to_save.save_pretrained(args.output_dir)
         tokenizer.save_pretrained(args.output_dir)
 
@@ -772,14 +802,18 @@ def main():
         tokenizer = tokenizer_class.from_pretrained(args.output_dir)
         model.to(args.device)
 
-
     # Evaluation
     results = {}
     if args.do_eval and args.local_rank in [-1, 0]:
+        with open(args.output_dir+"/layer_example_counter") as fin:
+            for i, line in enumerate(fin):
+                experiment.log_other("Epoch {}".format(i),
+                                     line.strip())
         tokenizer = tokenizer_class.from_pretrained(args.output_dir, do_lower_case=args.do_lower_case)
         checkpoints = [args.output_dir]
         if args.eval_all_checkpoints:
-            checkpoints = list(os.path.dirname(c) for c in sorted(glob.glob(args.output_dir + '/**/' + WEIGHTS_NAME, recursive=True)))
+            checkpoints = list(
+                os.path.dirname(c) for c in sorted(glob.glob(args.output_dir + '/**/' + WEIGHTS_NAME, recursive=True)))
             logging.getLogger("transformers.modeling_utils").setLevel(logging.WARN)  # Reduce logging
         logger.info("Evaluate the following checkpoints: %s", checkpoints)
         for checkpoint in checkpoints:
@@ -787,7 +821,7 @@ def main():
             prefix = checkpoint.split('/')[-1] if checkpoint.find('checkpoint') != -1 else ""
 
             model = model_class.from_pretrained(checkpoint)
-            if args.model_type=="bert":
+            if args.model_type == "bert":
                 model.bert.encoder.set_early_exit_entropy(args.early_exit_entropy)
             else:
                 model.roberta.encoder.set_early_exit_entropy(args.early_exit_entropy)
@@ -798,19 +832,19 @@ def main():
             print("result: {}".format(print_result))
             experiment.log_metric("final result", print_result)
 
-            if args.early_exit_entropy==-1 and args.eval_each_highway:
+            if args.early_exit_entropy == -1 and args.eval_each_highway:
                 last_layer_results = print_result
                 each_layer_results = []
                 for i in range(model.num_layers):
                     logger.info("\n")
                     _result = evaluate(args, model, tokenizer, prefix=prefix,
                                        output_layer=i, eval_highway=args.eval_highway)
-                    if i+1 < model.num_layers:
+                    if i + 1 < model.num_layers:
                         each_layer_results.append(get_wanted_result(_result))
                 each_layer_results.append(last_layer_results)
                 experiment.log_other(
                     "Each layer result",
-                    ' '.join([str(int(100*x)) for x in each_layer_results]))
+                    ' '.join([str(int(100 * x)) for x in each_layer_results]))
                 save_fname = args.plot_data_dir + args.model_name_or_path[2:] + "/each_layer.npy"
                 if not os.path.exists(os.path.dirname(save_fname)):
                     os.makedirs(os.path.dirname(save_fname))
