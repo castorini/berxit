@@ -436,8 +436,8 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 loss_fct = MSELoss()
                 loss = loss_fct(logits.view(-1), labels.view(-1))
             else:
-                loss_fct = CrossEntropyLoss()
-                        # reduction='none' if train_strategy=='cascade' else 'mean')
+                loss_fct = CrossEntropyLoss(
+                    reduction='none' if train_strategy=='cascade' else 'mean')
                 loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
 
             # work with highway exits
@@ -446,7 +446,10 @@ class BertForSequenceClassification(BertPreTrainedModel):
             for i, highway_exit in enumerate(outputs[-1]):
                 highway_logits = highway_exit[0]
                 if train_strategy=='cascade':
-                    wrong_this_layer = torch.argmax(highway_logits, dim=1) != labels
+                    if i<self.num_layers-1:
+                        wrong_this_layer = torch.argmax(highway_logits, dim=1) != labels
+                    else:
+                        wrong_this_layer = torch.argmax(logits, dim=1) != labels
                     each_layer_wrong.append(wrong_this_layer)
                     layer_example_counter[i+1] += torch.sum(wrong_this_layer)
                 if not self.training:
@@ -464,9 +467,16 @@ class BertForSequenceClassification(BertPreTrainedModel):
                                             labels.view(-1))
                     if train_strategy=='cascade':
                         if i>0:
-                            highway_loss *= each_layer_wrong[-1]
-                        # if i==self.num_layers-1:
-                        #     loss = torch.mean(loss * each_layer_wrong[-1])
+                            highway_loss = torch.masked_select(
+                                highway_loss,
+                                each_layer_wrong[-1]
+                            )
+                        if i==self.num_layers-1:
+                            loss = torch.mean(torch.masked_select(
+                                loss,
+                                each_layer_wrong[-1]
+                            ))
+                            # loss = torch.mean(loss)
                         highway_loss = torch.mean(highway_loss)
                 highway_losses.append(highway_loss)
 
@@ -480,8 +490,10 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 outputs = ([sum(highway_losses[:-1])+loss],) + outputs
                 # all highways (exclude the final one), plus the original classifier
             elif train_strategy == 'cascade':
-                # the same with all
-                outputs = ([sum(highway_losses[:-1])+loss],) + outputs
+                # remove all nans
+                potential_losses = highway_losses[:-1] + [loss]
+                valid_losses = [x for x in potential_losses if not torch.isnan(x)]
+                outputs = ([sum(valid_losses)],) + outputs
             elif train_strategy == 'half':
                 half_highway_losses = [
                     x for i, x in enumerate(highway_losses[:-1]) if i%2==1
