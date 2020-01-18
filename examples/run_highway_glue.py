@@ -161,7 +161,7 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
         ]
     elif train_strategy in ['all', 'self_distil', 'half', 'divide', 'full_divide',
                             'neigh_distil', 'half-pre_distil', 'half-distil',
-                            'cascade']:
+                            'cascade', 'conf_cascade']:
         optimizer_grouped_parameters = [
             {'params': [p for n, p in model.named_parameters() if
                         not any(nd in n for nd in no_decay)],
@@ -330,7 +330,7 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
                 epoch_iterator.close()
                 break
 
-        if train_strategy=='cascade':
+        if 'cascade' in train_strategy:
             counter_string = str(layer_example_counter[0]) + ' ' + \
                 ' '.join([
                     str(int(layer_example_counter[i+1].cpu().item()/layer_example_counter[0]*100))[:2]
@@ -573,7 +573,7 @@ def main():
                         choices=['raw', 'two_stage', 'all', 'self_distil',
                                  'layer_wise', 'half', 'divide', 'neigh_distil',
                                  'half-pre_distil', 'half-distil', 'cascade',
-                                 'full_divide'],
+                                 'full_divide', 'conf_cascade'],
                         default='raw', type=str,
                         help="Training routine (a routine can have mutliple stages, each with different strategies.")
 
@@ -781,6 +781,11 @@ def main():
                                          train_strategy='cascade')
             logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
+        elif args.train_routine == 'conf_cascade':
+            global_step, tr_loss = train(args, train_dataset, model, tokenizer,
+                                         train_strategy='conf_cascade')
+            logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
+
         else:
             raise NotImplementedError("Wrong training routine!")
 
@@ -809,7 +814,7 @@ def main():
     # Evaluation
     results = {}
     if args.do_eval and args.local_rank in [-1, 0]:
-        if args.train_routine=='cascade':
+        if 'cascade' in args.train_routine:
             with open(args.output_dir+"/layer_example_counter") as fin:
                 for i, line in enumerate(fin):
                     experiment.log_other("Epoch {}".format(i),

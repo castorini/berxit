@@ -149,12 +149,12 @@ class RobertaForSequenceClassification(BertPreTrainedModel):
                 loss = loss_fct(logits.view(-1), labels.view(-1))
             else:
                 loss_fct = CrossEntropyLoss(
-                    reduction='none' if train_strategy=='cascade' else 'mean')
+                    reduction='none' if 'cascade' in train_strategy else 'mean')
                 loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
 
             # work with highway exits
             highway_losses = []
-            each_layer_wrong = []
+            goto_next_layer = []
             for i, highway_exit in enumerate(outputs[-1]):
                 highway_logits = highway_exit[0]
                 if train_strategy=='cascade':
@@ -162,8 +162,15 @@ class RobertaForSequenceClassification(BertPreTrainedModel):
                         wrong_this_layer = torch.argmax(highway_logits, dim=1) != labels
                     else:
                         wrong_this_layer = torch.argmax(logits, dim=1) != labels
-                    each_layer_wrong.append(wrong_this_layer)
+                    goto_next_layer.append(wrong_this_layer)
                     layer_example_counter[i+1] += torch.sum(wrong_this_layer)
+                elif train_strategy=='conf_cascade':
+                    if i<self.num_layers-1:
+                        confusing_this_layer = entropy(highway_logits) > 0.1
+                    else:
+                        confusing_this_layer = entropy(logits) > 0.1
+                    goto_next_layer.append(confusing_this_layer)
+                    layer_example_counter[i+1] += torch.sum(confusing_this_layer)
 
                 if not self.training:
                     highway_logits_all.append(highway_logits)
@@ -175,19 +182,19 @@ class RobertaForSequenceClassification(BertPreTrainedModel):
                                             labels.view(-1))
                 else:
                     loss_fct = CrossEntropyLoss(
-                        reduction='none' if train_strategy=='cascade' else 'mean')
+                        reduction='none' if 'cascade' in train_strategy else 'mean')
                     highway_loss = loss_fct(highway_logits.view(-1, self.num_labels),
                                             labels.view(-1))
-                    if train_strategy=='cascade':
+                    if 'cascade' in train_strategy:
                         if i>0:
                             highway_loss = torch.masked_select(
                                 highway_loss,
-                                each_layer_wrong[-1]
+                                goto_next_layer[-1]
                             )
                         if i==self.num_layers-1:
                             loss = torch.mean(torch.masked_select(
                                 loss,
-                                each_layer_wrong[-1]
+                                goto_next_layer[-1]
                             ))
                             # loss = torch.mean(loss)
                         highway_loss = torch.mean(highway_loss)
@@ -203,7 +210,7 @@ class RobertaForSequenceClassification(BertPreTrainedModel):
             elif train_strategy in ['all', 'divide']:
                 outputs = ([sum(highway_losses[:-1]) + loss],) + outputs
                 # all highways (exclude the final one), plus the original classifier
-            elif train_strategy == 'cascade':
+            elif train_strategy in ['cascade', 'conf_cascade']:
                 # remove all nans
                 potential_losses = highway_losses[:-1] + [loss]
                 valid_losses = [x for x in potential_losses if not torch.isnan(x)]
