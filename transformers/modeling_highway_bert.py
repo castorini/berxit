@@ -59,17 +59,28 @@ class BertEncoder(nn.Module):
         self.output_hidden_states = config.output_hidden_states
         self.layer = nn.ModuleList([BertLayer(config) for _ in range(config.num_hidden_layers)])
         self.highway = nn.ModuleList([BertHighway(config) for _ in range(config.num_hidden_layers)])
-        try:
-            self.divide = config.divide
-            if self.divide:
-                self.mask = nn.Parameter(
-                    torch.Tensor(
-                        [1 for _ in range(config.hidden_size//2)]+
-                        [0 for _ in range(config.hidden_size//2)]),
-                    requires_grad=False
-                )
-        except AttributeError:
-            self.divide = False
+
+        self.divide = config.divide
+        if self.divide == 'divide':
+            self.mask = nn.Parameter(
+                torch.Tensor(
+                    [1 for _ in range(config.hidden_size//2)]+
+                    [0 for _ in range(config.hidden_size//2)]),
+                requires_grad=False
+            )
+        elif self.divide == 'full_divide':
+            self.upward_mask = nn.Parameter(
+                torch.Tensor(
+                    [1 for _ in range(config.hidden_size//2)]+
+                    [0 for _ in range(config.hidden_size//2)]),
+                requires_grad=False
+            )
+            self.rightward_mask = nn.Parameter(
+                torch.Tensor(
+                    [0 for _ in range(config.hidden_size//2)]+
+                    [1 for _ in range(config.hidden_size//2)]),
+                requires_grad=False
+            )
 
         self.early_exit_entropy = [-1 for _ in range(config.num_hidden_layers)]
 
@@ -95,6 +106,8 @@ class BertEncoder(nn.Module):
             if self.output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_states,)
 
+            if self.divide == 'full_divide' and i>0:
+                hidden_states *= self.upward_mask
             layer_outputs = layer_module(hidden_states, attention_mask, head_mask[i], encoder_hidden_states, encoder_attention_mask)
             hidden_states = layer_outputs[0]
 
@@ -107,9 +120,13 @@ class BertEncoder(nn.Module):
             if self.output_attentions:
                 current_outputs = current_outputs + (all_attentions,)
 
-            if self.divide:
+            if self.divide == 'divide':
                 highway_exit = self.highway[i](
                     (current_outputs[0]*self.mask,) + current_outputs[1:]
+                )
+            elif self.divide == 'full_divide':
+                highway_exit = self.highway[i](
+                    (current_outputs[0]*self.rightward_mask,) + current_outputs[1:]
                 )
             else:
                 highway_exit = self.highway[i](current_outputs)
@@ -487,7 +504,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
             elif train_strategy=='only_highway':
                 outputs = ([sum(highway_losses[:-1])],) + outputs
                 # exclude the final highway, of course
-            elif train_strategy in ['all', 'divide']:
+            elif train_strategy in ['all', 'divide', 'full_divide']:
                 outputs = ([sum(highway_losses[:-1])+loss],) + outputs
                 # all highways (exclude the final one), plus the original classifier
             elif train_strategy == 'cascade':
