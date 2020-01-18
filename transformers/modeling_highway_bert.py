@@ -452,6 +452,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
                         wrong_this_layer = torch.argmax(logits, dim=1) != labels
                     each_layer_wrong.append(wrong_this_layer)
                     layer_example_counter[i+1] += torch.sum(wrong_this_layer)
+
                 if not self.training:
                     highway_logits_all.append(highway_logits)
                     highway_entropy.append(highway_exit[2])

@@ -330,11 +330,12 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
                 epoch_iterator.close()
                 break
 
-        counter_string = str(layer_example_counter[0]) + ' ' + \
-            ' '.join([
-                str(int(layer_example_counter[i+1].cpu().item()/layer_example_counter[0]*100))[:2]
-                for i in range(model.num_layers)])
-        print(counter_string, file=fout)
+        if train_strategy=='cascade':
+            counter_string = str(layer_example_counter[0]) + ' ' + \
+                ' '.join([
+                    str(int(layer_example_counter[i+1].cpu().item()/layer_example_counter[0]*100))[:2]
+                    for i in range(model.num_layers)])
+            print(counter_string, file=fout)
 
         if args.max_steps > 0 and global_step > args.max_steps:
             train_iterator.close()
@@ -805,10 +806,11 @@ def main():
     # Evaluation
     results = {}
     if args.do_eval and args.local_rank in [-1, 0]:
-        with open(args.output_dir+"/layer_example_counter") as fin:
-            for i, line in enumerate(fin):
-                experiment.log_other("Epoch {}".format(i),
-                                     line.strip())
+        if args.train_routine=='cascade':
+            with open(args.output_dir+"/layer_example_counter") as fin:
+                for i, line in enumerate(fin):
+                    experiment.log_other("Epoch {}".format(i),
+                                         line.strip())
         tokenizer = tokenizer_class.from_pretrained(args.output_dir, do_lower_case=args.do_lower_case)
         checkpoints = [args.output_dir]
         if args.eval_all_checkpoints:

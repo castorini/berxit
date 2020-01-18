@@ -113,7 +113,8 @@ class RobertaForSequenceClassification(BertPreTrainedModel):
                 inputs_embeds=None,
                 labels=None,
                 output_layer=-1,
-                train_strategy='raw'):
+                train_strategy='raw',
+                layer_example_counter=None):
 
         exit_layer = self.num_layers
         try:
@@ -139,18 +140,31 @@ class RobertaForSequenceClassification(BertPreTrainedModel):
             highway_entropy = []
             highway_logits_all = []
         if labels is not None:
+            if layer_example_counter is not None:
+                layer_example_counter[0] += len(labels)
+
             if self.num_labels == 1:
                 #  We are doing regression
                 loss_fct = MSELoss()
                 loss = loss_fct(logits.view(-1), labels.view(-1))
             else:
-                loss_fct = CrossEntropyLoss()
+                loss_fct = CrossEntropyLoss(
+                    reduction='none' if train_strategy=='cascade' else 'mean')
                 loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
 
             # work with highway exits
             highway_losses = []
-            for highway_exit in outputs[-1]:
+            each_layer_wrong = []
+            for i, highway_exit in enumerate(outputs[-1]):
                 highway_logits = highway_exit[0]
+                if train_strategy=='cascade':
+                    if i<self.num_layers-1:
+                        wrong_this_layer = torch.argmax(highway_logits, dim=1) != labels
+                    else:
+                        wrong_this_layer = torch.argmax(logits, dim=1) != labels
+                    each_layer_wrong.append(wrong_this_layer)
+                    layer_example_counter[i+1] += torch.sum(wrong_this_layer)
+
                 if not self.training:
                     highway_logits_all.append(highway_logits)
                     highway_entropy.append(highway_exit[2])
@@ -160,9 +174,23 @@ class RobertaForSequenceClassification(BertPreTrainedModel):
                     highway_loss = loss_fct(highway_logits.view(-1),
                                             labels.view(-1))
                 else:
-                    loss_fct = CrossEntropyLoss()
+                    loss_fct = CrossEntropyLoss(
+                        reduction='none' if train_strategy=='cascade' else 'mean')
                     highway_loss = loss_fct(highway_logits.view(-1, self.num_labels),
                                             labels.view(-1))
+                    if train_strategy=='cascade':
+                        if i>0:
+                            highway_loss = torch.masked_select(
+                                highway_loss,
+                                each_layer_wrong[-1]
+                            )
+                        if i==self.num_layers-1:
+                            loss = torch.mean(torch.masked_select(
+                                loss,
+                                each_layer_wrong[-1]
+                            ))
+                            # loss = torch.mean(loss)
+                        highway_loss = torch.mean(highway_loss)
                 highway_losses.append(highway_loss)
 
 
@@ -172,9 +200,14 @@ class RobertaForSequenceClassification(BertPreTrainedModel):
             elif train_strategy == 'only_highway':
                 outputs = ([sum(highway_losses[:-1])],) + outputs
                 # exclude the final highway, of course
-            elif train_strategy == 'all':
+            elif train_strategy in ['all', 'divide']:
                 outputs = ([sum(highway_losses[:-1]) + loss],) + outputs
                 # all highways (exclude the final one), plus the original classifier
+            elif train_strategy == 'cascade':
+                # remove all nans
+                potential_losses = highway_losses[:-1] + [loss]
+                valid_losses = [x for x in potential_losses if not torch.isnan(x)]
+                outputs = ([sum(valid_losses)],) + outputs
             elif train_strategy == 'half':
                 half_highway_losses = [
                     x for i, x in enumerate(highway_losses[:-1]) if i%2==1
