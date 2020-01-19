@@ -414,6 +414,10 @@ class BertForSequenceClassification(BertPreTrainedModel):
         self.classifier = nn.Linear(config.hidden_size, self.config.num_labels)
 
         self.init_weights()
+        self.training_threshold = 0.1
+
+    def update_threshold(self, func):
+        self.training_threshold = func(self.training_threshold)
 
     def forward(self, input_ids=None, attention_mask=None, token_type_ids=None,
                 position_ids=None, head_mask=None, inputs_embeds=None, labels=None,
@@ -471,9 +475,9 @@ class BertForSequenceClassification(BertPreTrainedModel):
                     layer_example_counter[i+1] += torch.sum(wrong_this_layer)
                 elif train_strategy=='conf_cascade':
                     if i<self.num_layers-1:
-                        confusing_this_layer = entropy(highway_logits) > 0.1
+                        confusing_this_layer = entropy(highway_logits) > self.training_threshold
                     else:
-                        confusing_this_layer = entropy(logits) > 0.1
+                        confusing_this_layer = entropy(logits) > self.training_threshold
                     goto_next_layer.append(confusing_this_layer)
                     layer_example_counter[i+1] += torch.sum(confusing_this_layer)
 

@@ -330,6 +330,8 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
                 epoch_iterator.close()
                 break
 
+        model.update_threshold(lambda x: x*0.7)
+
         if 'cascade' in train_strategy:
             counter_string = str(layer_example_counter[0]) + ' ' + \
                 ' '.join([
