@@ -575,7 +575,7 @@ def main():
                         choices=['raw', 'two_stage', 'all', 'self_distil',
                                  'layer_wise', 'half', 'divide', 'neigh_distil',
                                  'half-pre_distil', 'half-distil', 'cascade',
-                                 'full_divide', 'conf_cascade'],
+                                 'full_divide', 'conf_cascade', 'raw1'],
                         default='raw', type=str,
                         help="Training routine (a routine can have mutliple stages, each with different strategies.")
 
@@ -699,6 +699,8 @@ def main():
     else:
         model.roberta.encoder.set_early_exit_entropy(args.early_exit_entropy)
         model.roberta.init_highway_pooler()
+    if args.train_routine == 'raw1':
+        model.bert.pooler.set_chosen_token(1)
 
     if args.local_rank == 0:
         torch.distributed.barrier()  # Make sure only the first process in distributed training will download model & vocab
@@ -711,7 +713,7 @@ def main():
     if args.do_train:
         train_dataset = load_and_cache_examples(args, args.task_name, tokenizer, evaluate=False)
 
-        if args.train_routine == "raw":
+        if args.train_routine in ["raw", 'raw1']:
             global_step, tr_loss = train(args, train_dataset, model, tokenizer)
             logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
@@ -837,6 +839,8 @@ def main():
                 model.bert.encoder.set_early_exit_entropy(args.early_exit_entropy)
             else:
                 model.roberta.encoder.set_early_exit_entropy(args.early_exit_entropy)
+            if args.train_routine == 'raw1':
+                model.bert.pooler.set_chosen_token(1)
             model.to(args.device)
             result = evaluate(args, model, tokenizer, prefix=prefix,
                               eval_highway=args.eval_highway)

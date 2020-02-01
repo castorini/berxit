@@ -169,13 +169,17 @@ class BertPooler(nn.Module):
         super(BertPooler, self).__init__()
         self.dense = nn.Linear(config.hidden_size, config.hidden_size)
         self.activation = nn.Tanh()
+        self.chosen_token = 0
 
         # Pooler weights also needs to be loaded, especially in Highway!
+
+    def set_chosen_token(self, newid):
+        self.chosen_token = newid
 
     def forward(self, hidden_states):
         # We "pool" the model by simply taking the hidden state corresponding
         # to the first token.
-        first_token_tensor = hidden_states[:, 0]
+        first_token_tensor = hidden_states[:, self.chosen_token]
         pooled_output = self.dense(first_token_tensor)
         pooled_output = self.activation(pooled_output)
         return pooled_output
@@ -510,7 +514,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 highway_losses.append(highway_loss)
 
             # loss (first entry of outputs), is no longer one variable, but a list of them
-            if train_strategy=='raw':
+            if train_strategy == 'raw':
                 outputs = ([loss],) + outputs
             elif train_strategy=='only_highway':
                 outputs = ([sum(highway_losses[:-1])],) + outputs
