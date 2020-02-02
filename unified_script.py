@@ -85,6 +85,14 @@ best_epochs = {
     "roberta-large": 10
 }
 
+log_folder = "logs"
+existed_experiments = []
+for x in os.listdir(log_folder):
+    num, suffix = x.split('.')
+    if num not in existed_experiments and num.isnumeric():
+        existed_experiments.append(num)
+filecount = len(existed_experiments)
+
 script_template = {
     "raw":
         r"""python -um examples.run_glue \
@@ -104,7 +112,8 @@ script_template = {
     --seed {} \
     --output_dir ./saved_models/{}/{}/{} \
     --overwrite_cache \
-    --overwrite_output_dir""",
+    --overwrite_output_dir\
+    --log_id {}""",
 
     "train_highway":
         r"""python -um examples.run_highway_glue \
@@ -125,7 +134,8 @@ script_template = {
     --output_dir ./saved_models/{}/{}/{} \
     --save_steps 0 \
     --overwrite_cache \
-    --train_routine {}""",
+    --train_routine {}\
+    --log_id {}""",
 
     "eval_highway":
         r"""python -um examples.run_highway_glue \
@@ -143,7 +153,8 @@ script_template = {
     --eval_highway \
     --overwrite_cache \
     --per_gpu_eval_batch_size=1\
-    --train_routine {}"""
+    --train_routine {}\
+    --log_id {}"""
 }
 
 if flavor == "eval_highway":
@@ -159,7 +170,8 @@ if flavor == "eval_highway":
         routine + '-' + seed,
         seed,
         entropy,
-        routine
+        routine,
+        filecount
     )
 elif flavor == "train_highway":
     script = script_template[flavor].format(
@@ -173,7 +185,8 @@ elif flavor == "train_highway":
         model,
         dataset,
         routine + '-' + seed,
-        routine
+        routine,
+        filecount
     )
 elif flavor == "raw":
     script = script_template[flavor].format(
@@ -186,7 +199,8 @@ elif flavor == "raw":
         seed,
         model,
         dataset,
-        flavor + '-' + seed
+        flavor + '-' + seed,
+        filecount
     )
 elif flavor == "entropy":
     if inter != "True":
@@ -205,7 +219,8 @@ elif flavor == "entropy":
             model,
             dataset,
             routine + '-' + seed,
-            curr_entropy
+            curr_entropy,
+            filecount
         )
         # print(script)
         os.system(script)
@@ -224,7 +239,6 @@ else:
     with open("slurm_submit.sh", 'w') as f:
         print(script, file=f)
     if os.environ["HOSTNAME"]=='v':
-        os.system("python ~/v2_submit.py slurm_submit.sh")
+        os.system("python v2_submit.py slurm_submit.sh " + str(filecount))
     else:
-        os.system("python ~/submit.py slurm_submit.sh")
-
+        os.system("python submit.py slurm_submit.sh " + str(filecount))
