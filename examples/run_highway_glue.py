@@ -575,7 +575,7 @@ def main():
                         choices=['raw', 'two_stage', 'all', 'self_distil',
                                  'layer_wise', 'half', 'divide', 'neigh_distil',
                                  'half-pre_distil', 'half-distil', 'cascade',
-                                 'full_divide', 'conf_cascade', 'raw1'],
+                                 'full_divide', 'conf_cascade', 'raw1', 'all01', 'all0-1'],
                         default='raw', type=str,
                         help="Training routine (a routine can have mutliple stages, each with different strategies.")
 
@@ -701,6 +701,12 @@ def main():
         model.roberta.init_highway_pooler()
     if args.train_routine == 'raw1':
         model.bert.pooler.set_chosen_token(1)
+    if args.train_routine == 'all01':
+        for i in range(model.num_layers):
+            model.bert.encoder.highway[i].pooler.set_chosen_token(1)
+    if args.train_routine == 'all0-1':
+        for i in range(model.num_layers):
+            model.bert.encoder.highway[i].pooler.set_chosen_token(-1)
 
     if args.local_rank == 0:
         torch.distributed.barrier()  # Make sure only the first process in distributed training will download model & vocab
@@ -728,7 +734,7 @@ def main():
             # second stage
             train(args, train_dataset, model, tokenizer, train_strategy="only_highway")
 
-        elif args.train_routine == 'all':
+        elif args.train_routine in ['all', 'all01', 'all0-1']:
             global_step, tr_loss = train(args, train_dataset, model, tokenizer,
                                          train_strategy='all')
             logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
@@ -841,6 +847,12 @@ def main():
                 model.roberta.encoder.set_early_exit_entropy(args.early_exit_entropy)
             if args.train_routine == 'raw1':
                 model.bert.pooler.set_chosen_token(1)
+            if args.train_routine == 'all01':
+                for i in range(model.num_layers):
+                    model.bert.encoder.highway[i].pooler.set_chosen_token(1)
+            if args.train_routine == 'all0-1':
+                for i in range(model.num_layers):
+                    model.bert.encoder.highway[i].pooler.set_chosen_token(-1)
             model.to(args.device)
             result = evaluate(args, model, tokenizer, prefix=prefix,
                               eval_highway=args.eval_highway)
