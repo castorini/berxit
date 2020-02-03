@@ -522,6 +522,8 @@ class BertForSequenceClassification(BertPreTrainedModel):
             elif train_strategy in ['all', 'divide', 'full_divide']:
                 outputs = ([sum(highway_losses[:-1])+loss],) + outputs
                 # all highways (exclude the final one), plus the original classifier
+            elif train_strategy == 'shrink':
+                outputs = ([sum(highway_losses[:-1])/(self.num_layers) + loss],) + outputs
             elif train_strategy in ['cascade', 'conf_cascade']:
                 # remove all nans
                 potential_losses = highway_losses[:-1] + [loss]

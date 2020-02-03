@@ -153,3 +153,4 @@ slurm_submit.sh
 # temporary saved note
 parameter.list
 experiment.note
+sample_param

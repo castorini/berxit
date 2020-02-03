@@ -139,7 +139,8 @@ def get_args():
                         choices=['raw', 'two_stage', 'all', 'self_distil',
                                  'layer_wise', 'half', 'divide', 'neigh_distil',
                                  'half-pre_distil', 'half-distil', 'cascade',
-                                 'full_divide', 'conf_cascade', 'raw1', 'all01', 'all0-1'],
+                                 'full_divide', 'conf_cascade', 'raw1', 'all01', 'all0-1',
+                                 'shrink'],
                         default='raw', type=str,
                         help="Training routine (a routine can have mutliple stages, each with different strategies.")
 
@@ -254,7 +255,7 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
         ]
     elif train_strategy in ['all', 'self_distil', 'half', 'divide', 'full_divide',
                             'neigh_distil', 'half-pre_distil', 'half-distil',
-                            'cascade', 'conf_cascade']:
+                            'cascade', 'conf_cascade', 'shrink']:
         optimizer_grouped_parameters = [
             {'params': [p for n, p in model.named_parameters() if
                         not any(nd in n for nd in no_decay)],
@@ -376,7 +377,6 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
                         scaled_loss.backward(retain_graph=True)
                 else:
                     loss.backward(retain_graph=True)
-
                 tr_loss += loss.item()
                 if (step + 1) % args.gradient_accumulation_steps == 0:
                     if args.fp16:
@@ -732,26 +732,6 @@ def main(args):
             # second stage
             train(args, train_dataset, model, tokenizer, train_strategy="only_highway")
 
-        elif args.train_routine in ['all', 'all01', 'all0-1']:
-            global_step, tr_loss = train(args, train_dataset, model, tokenizer,
-                                         train_strategy='all')
-            logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
-
-        elif args.train_routine == 'half':
-            global_step, tr_loss = train(args, train_dataset, model, tokenizer,
-                                         train_strategy='half')
-            logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
-
-        elif args.train_routine == 'self_distil':
-            global_step, tr_loss = train(args, train_dataset, model, tokenizer,
-                                         train_strategy="self_distil")
-            logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
-
-        elif args.train_routine == 'neigh_distil':
-            global_step, tr_loss = train(args, train_dataset, model, tokenizer,
-                                         train_strategy="neigh_distil")
-            logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
-
         elif args.train_routine == 'layer_wise':
             global_step, tr_loss = train(args, train_dataset, model, tokenizer)
             logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
@@ -764,34 +744,16 @@ def main(args):
                                          train_strategy="layer_wise")
             logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
-        elif args.train_routine == 'divide':
+        elif args.train_routine in ['all', 'all01', 'all0-1']:
             global_step, tr_loss = train(args, train_dataset, model, tokenizer,
-                                         train_strategy='divide')
+                                         train_strategy='all')
             logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
-        elif args.train_routine == 'full_divide':
+        elif args.train_routine in ['half', 'self_distil', 'neigh_distil', 'divide',
+                                    'full_divide', 'half-pre_distil', 'half_distil',
+                                    'cascade', 'conf_cascade', 'shrink']:
             global_step, tr_loss = train(args, train_dataset, model, tokenizer,
-                                         train_strategy='full_divide')
-            logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
-
-        elif args.train_routine == 'half-pre_distil':
-            global_step, tr_loss = train(args, train_dataset, model, tokenizer,
-                                         train_strategy='half-pre_distil')
-            logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
-
-        elif args.train_routine == 'half-distil':
-            global_step, tr_loss = train(args, train_dataset, model, tokenizer,
-                                         train_strategy='half-distil')
-            logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
-
-        elif args.train_routine == 'cascade':
-            global_step, tr_loss = train(args, train_dataset, model, tokenizer,
-                                         train_strategy='cascade')
-            logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
-
-        elif args.train_routine == 'conf_cascade':
-            global_step, tr_loss = train(args, train_dataset, model, tokenizer,
-                                         train_strategy='conf_cascade')
+                                         train_strategy=args.train_routine)
             logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
         else:
