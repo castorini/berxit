@@ -694,17 +694,25 @@ def main(args):
     if args.model_type == "bert":
         model.bert.encoder.set_early_exit_entropy(args.early_exit_entropy)
         model.bert.init_highway_pooler()
+        if args.train_routine == 'raw1':
+            model.bert.pooler.set_chosen_token(1)
+        if args.train_routine == 'all01':
+            for i in range(model.num_layers):
+                model.bert.encoder.highway[i].pooler.set_chosen_token(1)
+        if args.train_routine in ['all0-1', 'shrink-1']:
+            for i in range(model.num_layers):
+                model.bert.encoder.highway[i].pooler.set_chosen_token(-1)
     else:
         model.roberta.encoder.set_early_exit_entropy(args.early_exit_entropy)
         model.roberta.init_highway_pooler()
-    if args.train_routine == 'raw1':
-        model.bert.pooler.set_chosen_token(1)
-    if args.train_routine == 'all01':
-        for i in range(model.num_layers):
-            model.bert.encoder.highway[i].pooler.set_chosen_token(1)
-    if args.train_routine in ['all0-1', 'shrink-1']:
-        for i in range(model.num_layers):
-            model.bert.encoder.highway[i].pooler.set_chosen_token(-1)
+        if args.train_routine == 'raw1':
+            model.roberta.pooler.set_chosen_token(1)
+        if args.train_routine == 'all01':
+            for i in range(model.num_layers):
+                model.roberta.encoder.highway[i].pooler.set_chosen_token(1)
+        if args.train_routine in ['all0-1', 'shrink-1']:
+            for i in range(model.num_layers):
+                model.roberta.encoder.highway[i].pooler.set_chosen_token(-1)
 
     if args.local_rank == 0:
         torch.distributed.barrier()  # Make sure only the first process in distributed training will download model & vocab
@@ -808,16 +816,25 @@ def main(args):
             model = model_class.from_pretrained(checkpoint)
             if args.model_type == "bert":
                 model.bert.encoder.set_early_exit_entropy(args.early_exit_entropy)
+                if args.train_routine == 'raw1':
+                    model.bert.pooler.set_chosen_token(1)
+                if args.train_routine == 'all01':
+                    for i in range(model.num_layers):
+                        model.bert.encoder.highway[i].pooler.set_chosen_token(1)
+                if args.train_routine in ['all0-1', 'shrink-1']:
+                    for i in range(model.num_layers):
+                        model.bert.encoder.highway[i].pooler.set_chosen_token(-1)
             else:
                 model.roberta.encoder.set_early_exit_entropy(args.early_exit_entropy)
-            if args.train_routine == 'raw1':
-                model.bert.pooler.set_chosen_token(1)
-            if args.train_routine == 'all01':
-                for i in range(model.num_layers):
-                    model.bert.encoder.highway[i].pooler.set_chosen_token(1)
-            if args.train_routine in ['all0-1', 'shrink-1']:
-                for i in range(model.num_layers):
-                    model.bert.encoder.highway[i].pooler.set_chosen_token(-1)
+                if args.train_routine == 'raw1':
+                    model.roberta.pooler.set_chosen_token(1)
+                if args.train_routine == 'all01':
+                    for i in range(model.num_layers):
+                        model.roberta.encoder.highway[i].pooler.set_chosen_token(1)
+                if args.train_routine in ['all0-1', 'shrink-1']:
+                    for i in range(model.num_layers):
+                        model.roberta.encoder.highway[i].pooler.set_chosen_token(-1)
+
             model.to(args.device)
             result = evaluate(args, model, tokenizer, prefix=prefix,
                               eval_highway=args.eval_highway)
