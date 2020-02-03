@@ -140,7 +140,7 @@ def get_args():
                                  'layer_wise', 'half', 'divide', 'neigh_distil',
                                  'half-pre_distil', 'half-distil', 'cascade',
                                  'full_divide', 'conf_cascade', 'raw1', 'all01', 'all0-1',
-                                 'shrink'],
+                                 'shrink', 'shrink-1'],
                         default='raw', type=str,
                         help="Training routine (a routine can have mutliple stages, each with different strategies.")
 
@@ -702,7 +702,7 @@ def main(args):
     if args.train_routine == 'all01':
         for i in range(model.num_layers):
             model.bert.encoder.highway[i].pooler.set_chosen_token(1)
-    if args.train_routine == 'all0-1':
+    if args.train_routine in ['all0-1', 'shrink-1']:
         for i in range(model.num_layers):
             model.bert.encoder.highway[i].pooler.set_chosen_token(-1)
 
@@ -749,9 +749,14 @@ def main(args):
                                          train_strategy='all')
             logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
+        elif args.train_routine in ['shrink', 'shrink-1']:
+            global_step, tr_loss = train(args, train_dataset, model, tokenizer,
+                                         train_strategy='shrink')
+            logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
+
         elif args.train_routine in ['half', 'self_distil', 'neigh_distil', 'divide',
                                     'full_divide', 'half-pre_distil', 'half_distil',
-                                    'cascade', 'conf_cascade', 'shrink']:
+                                    'cascade', 'conf_cascade']:
             global_step, tr_loss = train(args, train_dataset, model, tokenizer,
                                          train_strategy=args.train_routine)
             logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
@@ -810,7 +815,7 @@ def main(args):
             if args.train_routine == 'all01':
                 for i in range(model.num_layers):
                     model.bert.encoder.highway[i].pooler.set_chosen_token(1)
-            if args.train_routine == 'all0-1':
+            if args.train_routine in ['all0-1', 'shrink-1']:
                 for i in range(model.num_layers):
                     model.bert.encoder.highway[i].pooler.set_chosen_token(-1)
             model.to(args.device)
