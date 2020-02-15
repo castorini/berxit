@@ -60,7 +60,11 @@ class BertEncoder(nn.Module):
         self.layer = nn.ModuleList([BertLayer(config) for _ in range(config.num_hidden_layers)])
         self.highway = nn.ModuleList([BertHighway(config) for _ in range(config.num_hidden_layers)])
 
-        self.divide = config.divide
+        try:
+            self.divide = config.divide
+        except AttributeError:
+            self.divide = "No"
+
         if self.divide == 'divide':
             self.mask = nn.Parameter(
                 torch.Tensor(

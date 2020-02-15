@@ -144,6 +144,8 @@ def get_args():
                         default='raw', type=str,
                         help="Training routine (a routine can have mutliple stages, each with different strategies.")
 
+    parser.add_argument("--no_comet", action='store_true',
+                        help="Don't upload to comet:highway")
     parser.add_argument('--logging_steps', type=int, default=50,
                         help="Log every X updates steps.")
     parser.add_argument('--save_steps', type=int, default=50,
@@ -184,7 +186,7 @@ logger = logging.getLogger(__name__)
 logger.info("SLURM_JOB_ID: {}".format(os.environ["SLURM_JOB_ID"]))
 logger.info("SLURM_INFO: {}".format([x for x in os.environ.items() if "SLURM" in x[0]]))
 
-experiment = cm.Experiment(project_name='highway',
+experiment = cm.Experiment(project_name='useless-debug' if args.no_comet else 'highway',
                            log_code=False,
                            auto_output_logging=False,
                            parse_args=False,
@@ -472,6 +474,7 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
         preds = None
         out_label_ids = None
         exit_layer_counter = {(i + 1): 0 for i in range(model.num_layers)}
+        entropy_collection = []
         st = time.time()
         for batch in tqdm(eval_dataloader, desc="Evaluating"):
             model.eval()
@@ -487,6 +490,9 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
                 if output_layer >= 0:
                     inputs['output_layer'] = output_layer
                 outputs = model(**inputs)
+                entropy_collection.append(
+                    [x.cpu().item() for x in outputs[3][1][:-1]] + [outputs[3][0].cpu().item()]
+                )
                 if eval_highway:
                     exit_layer_counter[outputs[-1]] += 1
                 tmp_eval_loss, logits = outputs[:2]
@@ -500,6 +506,10 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
             else:
                 preds = np.append(preds, logits.detach().cpu().numpy(), axis=0)
                 out_label_ids = np.append(out_label_ids, inputs['labels'].detach().cpu().numpy(), axis=0)
+        np.save(
+            args.plot_data_dir + args.model_name_or_path[2:] + "/entropy_distri.npy",
+            np.array(entropy_collection)
+        )
         eval_time = time.time() - st
         print("Eval time:", eval_time)
 
