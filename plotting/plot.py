@@ -11,16 +11,20 @@ def np_load(fname):
 
 
 get_entropy = lambda x: float(x[x.index('entropy_')+8:x.index('.npy')])
+def get_entropy(x):
+    try:
+        return float(x[x.index('entropy_')+8:x.index('.npy')])
+    except ValueError:
+        return False
 
 
 def get_files(model, dataset):
     filepath = f"saved_models/{model}/{dataset}/"
     nextlevel = os.listdir(filepath)
     nextlevel = [x for x in nextlevel if ".zip" not in x]
-    if len(nextlevel)>1:
-        raise ValueError(filepath + " has more than 1 child folder!")
-    filepath += nextlevel[0] + '/'
-    entropy_files = [x for x in os.listdir(filepath) if "entropy" in x]
+    idx = nextlevel.index('two_stage-42')
+    filepath += nextlevel[idx] + '/'
+    entropy_files = [x for x in os.listdir(filepath) if "entropy" in x and get_entropy(x)]
     entropy_files.sort(key=get_entropy)
     return [
         filepath + "each_layer.npy",
@@ -157,8 +161,9 @@ for model in models:
     samples_layer_data.append(model_samples_layer_data)
 
 
-# show_results([entropy_data, time_data, acc_data, err_data])
+show_results([entropy_data, time_data, acc_data, err_data])
 
+exit(0)
 
 
 sns.set(style='whitegrid', font_scale=2.5)
