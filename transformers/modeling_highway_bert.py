@@ -430,7 +430,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
     def forward(self, input_ids=None, attention_mask=None, token_type_ids=None,
                 position_ids=None, head_mask=None, inputs_embeds=None, labels=None,
                 output_layer=-1, train_strategy='raw',
-                layer_example_counter=None):
+                layer_example_counter=None, step_num=-1):
 
         exit_layer = self.num_layers
         try:
@@ -587,6 +587,24 @@ class BertForSequenceClassification(BertPreTrainedModel):
                     )
                 outputs = ([sum(highway_losses[:-1]) + loss + sum(distil_losses)],)\
                           + outputs
+            elif train_strategy=='distil_only':
+                # the following input_logits are before softmax
+                # final layer logits: logits
+                # logits from layer[i]: outputs[-1][i][0]
+                if step_num%2==0:
+                    outputs = ([loss],) + outputs
+                else:
+                    temperature = 1.0
+                    softmax_fct = nn.Softmax(dim=1)
+                    teacher_softmax = softmax_fct(logits.detach()) / temperature
+                    distil_losses = []
+                    for i in range(self.num_layers-1):
+                        student_softmax = softmax_fct(outputs[-1][i][0]) / temperature
+                        distil_losses.append(
+                            - temperature**2 * torch.sum(
+                                teacher_softmax * torch.log(student_softmax))
+                        )
+                    outputs = ([loss + sum(distil_losses)],) + outputs
             elif train_strategy=='half-pre_distil':
                 # the following input_logits are before softmax
                 # hidden_state after layer[i]: outputs[-1][i][1]

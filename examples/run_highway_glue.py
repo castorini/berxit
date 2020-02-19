@@ -140,7 +140,7 @@ def get_args():
                                  'layer_wise', 'half', 'divide', 'neigh_distil',
                                  'half-pre_distil', 'half-distil', 'cascade',
                                  'full_divide', 'conf_cascade', 'raw1', 'all01', 'all0-1',
-                                 'shrink', 'shrink-1', 'shsd-1'],
+                                 'shrink', 'shrink-1', 'shsd-1', 'distil_only'],
                         default='raw', type=str,
                         help="Training routine (a routine can have mutliple stages, each with different strategies.")
 
@@ -257,7 +257,7 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
         ]
     elif train_strategy in ['all', 'self_distil', 'half', 'divide', 'full_divide',
                             'neigh_distil', 'half-pre_distil', 'half-distil',
-                            'cascade', 'conf_cascade', 'shrink', 'shsd']:
+                            'cascade', 'conf_cascade', 'shrink', 'shsd', 'distil_only']:
         optimizer_grouped_parameters = [
             {'params': [p for n, p in model.named_parameters() if
                         not any(nd in n for nd in no_decay)],
@@ -361,6 +361,7 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
                                                                            'xlnet'] else None  # XLM, DistilBERT and RoBERTa don't use segment_ids
             inputs['train_strategy'] = train_strategy
             inputs['layer_example_counter'] = layer_example_counter
+            inputs['step_num'] = step
             outputs = model(**inputs)
             losses = outputs[0]  # model outputs are always tuple in transformers (see doc)
 
@@ -506,10 +507,13 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
             else:
                 preds = np.append(preds, logits.detach().cpu().numpy(), axis=0)
                 out_label_ids = np.append(out_label_ids, inputs['labels'].detach().cpu().numpy(), axis=0)
-        np.save(
-            args.plot_data_dir + args.model_name_or_path[2:] + "/entropy_distri.npy",
-            np.array(entropy_collection)
-        )
+        if eval_highway:
+            save_fname = args.plot_data_dir + \
+                         args.model_name_or_path[2:] + \
+                         "/entropy_distri.npy"
+            if not os.path.exists(os.path.dirname(save_fname)):
+                os.makedirs(os.path.dirname(save_fname))
+            np.save(save_fname, np.array(entropy_collection))
         eval_time = time.time() - st
         print("Eval time:", eval_time)
 
@@ -779,7 +783,7 @@ def main(args):
 
         elif args.train_routine in ['half', 'self_distil', 'neigh_distil', 'divide',
                                     'full_divide', 'half-pre_distil', 'half_distil',
-                                    'cascade', 'conf_cascade']:
+                                    'cascade', 'conf_cascade', 'distil_only']:
             global_step, tr_loss = train(args, train_dataset, model, tokenizer,
                                          train_strategy=args.train_routine)
             logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
