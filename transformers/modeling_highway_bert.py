@@ -526,7 +526,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
             elif train_strategy in ['all', 'divide', 'full_divide']:
                 outputs = ([sum(highway_losses[:-1])+loss],) + outputs
                 # all highways (exclude the final one), plus the original classifier
-            elif train_strategy == 'all_alternate':
+            elif train_strategy == 'alternate':
                 if step_num%2==0:
                     outputs = ([loss],) + outputs
                 else:

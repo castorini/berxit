@@ -141,7 +141,7 @@ def get_args():
                                  'half-pre_distil', 'half-distil', 'cascade',
                                  'full_divide', 'conf_cascade', 'raw1', 'all01', 'all0-1',
                                  'shrink', 'shrink-1', 'shsd-1', 'distil_only',
-                                 'all_alternate'],
+                                 'all_alternate', 'alternate-1'],
                         default='raw', type=str,
                         help="Training routine (a routine can have mutliple stages, each with different strategies.")
 
@@ -259,7 +259,7 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
     elif train_strategy in ['all', 'self_distil', 'half', 'divide', 'full_divide',
                             'neigh_distil', 'half-pre_distil', 'half-distil',
                             'cascade', 'conf_cascade', 'shrink', 'shsd',
-                            'distil_only', 'all_alternate']:
+                            'distil_only', 'alternate']:
         optimizer_grouped_parameters = [
             {'params': [p for n, p in model.named_parameters() if
                         not any(nd in n for nd in no_decay)],
@@ -715,7 +715,7 @@ def main(args):
         if args.train_routine == 'all01':
             for i in range(model.num_layers):
                 model.bert.encoder.highway[i].pooler.set_chosen_token(1)
-        if args.train_routine in ['all0-1', 'shrink-1', 'shsd-1']:
+        if args.train_routine in ['all0-1', 'shrink-1', 'shsd-1', 'alternate-1']:
             for i in range(model.num_layers):
                 model.bert.encoder.highway[i].pooler.set_chosen_token(-1)
     else:
@@ -726,7 +726,7 @@ def main(args):
         if args.train_routine == 'all01':
             for i in range(model.num_layers):
                 model.roberta.encoder.highway[i].pooler.set_chosen_token(1)
-        if args.train_routine in ['all0-1', 'shrink-1', 'shsd-1']:
+        if args.train_routine in ['all0-1', 'shrink-1', 'shsd-1', 'alternate-1']:
             for i in range(model.num_layers):
                 model.roberta.encoder.highway[i].pooler.set_chosen_token(-1)
 
@@ -773,6 +773,11 @@ def main(args):
                                          train_strategy='all')
             logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
+        elif args.train_routine in ['all_alternate', 'alternate-1']:
+            global_step, tr_loss = train(args, train_dataset, model, tokenizer,
+                                         train_strategy='alternate')
+            logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
+
         elif args.train_routine in ['shrink', 'shrink-1']:
             global_step, tr_loss = train(args, train_dataset, model, tokenizer,
                                          train_strategy='shrink')
@@ -785,8 +790,7 @@ def main(args):
 
         elif args.train_routine in ['half', 'self_distil', 'neigh_distil', 'divide',
                                     'full_divide', 'half-pre_distil', 'half_distil',
-                                    'cascade', 'conf_cascade', 'distil_only',
-                                    'all_alternate']:
+                                    'cascade', 'conf_cascade', 'distil_only']:
             global_step, tr_loss = train(args, train_dataset, model, tokenizer,
                                          train_strategy=args.train_routine)
             logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
@@ -843,7 +847,7 @@ def main(args):
                 if args.train_routine == 'all01':
                     for i in range(model.num_layers):
                         model.bert.encoder.highway[i].pooler.set_chosen_token(1)
-                if args.train_routine in ['all0-1', 'shrink-1', 'shsd-1']:
+                if args.train_routine in ['all0-1', 'shrink-1', 'shsd-1', 'alternate-1']:
                     for i in range(model.num_layers):
                         model.bert.encoder.highway[i].pooler.set_chosen_token(-1)
             else:
@@ -853,7 +857,7 @@ def main(args):
                 if args.train_routine == 'all01':
                     for i in range(model.num_layers):
                         model.roberta.encoder.highway[i].pooler.set_chosen_token(1)
-                if args.train_routine in ['all0-1', 'shrink-1', 'shsd-1']:
+                if args.train_routine in ['all0-1', 'shrink-1', 'shsd-1', 'alternate-1']:
                     for i in range(model.num_layers):
                         model.roberta.encoder.highway[i].pooler.set_chosen_token(-1)
 
@@ -890,4 +894,3 @@ def main(args):
 
 if __name__ == "__main__":
     main(args)
-    print("AFTER SUBMITTING BERT-LARGE FOR MRPC AND QNLI")
