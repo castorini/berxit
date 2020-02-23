@@ -235,6 +235,33 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
     else:
         t_total = len(train_dataloader) // args.gradient_accumulation_steps * args.num_train_epochs
 
+    # calculate number of parameters
+    if True:
+        counter = {
+            "embedding": 0,
+            "layernorm": 0,
+            "trm": 0,
+            "highway": 0,
+            "final": 0,
+            "all": 0
+        }
+        for n, p in model.named_parameters():
+            size = p.numel()
+            if "highway" in n:
+                counter["highway"] += size
+            elif "layer" in n:
+                counter["trm"] += size
+            elif "LayerNorm" in n:
+                counter["layernorm"] += size
+            elif "embedding" in n:
+                counter["embedding"] += size
+            else:
+                print(n)
+                counter["final"] += size
+            counter["all"] += size
+        print(counter)
+        exit(0)
+
     # Prepare optimizer and schedule (linear warmup and decay)
     no_decay = ['bias', 'LayerNorm.weight']
     if train_strategy == 'raw':
