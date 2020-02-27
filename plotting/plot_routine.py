@@ -9,7 +9,8 @@ model = sys.argv[1]
 
 formal_name = {
     "shrink-1": "weight-tok",
-    "all": "joint"
+    "all": "joint",
+    "all_alternate": "alternating"
 }
 
 colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
@@ -17,8 +18,9 @@ colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
 color = {
     "two_stage": 0,
     "joint": 1,
-    "weight-tok": 2,
-    "all_alternate": 3
+    "alternating": 2,
+    "weight-tok": 3,
+    "alternate-1": 4
 }
 
 def np_load(fname):
@@ -26,8 +28,10 @@ def np_load(fname):
 
 datasets = ["RTE", "MRPC", "SST-2", "QNLI", "QQP", "MNLI"]
 sizes = ["2.5k", "3.5k", "67k", "108k", "363k", "392k"]
-routines = ["two_stage", "all", "shrink-1", "all_alternate"]
-M, N = 3, len(datasets)//3
+routines = ["two_stage", "all"] #, "all_alternate"]
+
+rows = 2 # 2 for landscape, 3 for portrait
+M, N = rows, len(datasets)//rows
 fig, axes = plt.subplots(M, N, figsize=[N*4, M*4])
 axes.reshape([-1])
 

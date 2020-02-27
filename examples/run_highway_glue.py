@@ -536,13 +536,15 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
             else:
                 preds = np.append(preds, logits.detach().cpu().numpy(), axis=0)
                 out_label_ids = np.append(out_label_ids, inputs['labels'].detach().cpu().numpy(), axis=0)
-        if eval_highway:
-            save_fname = args.plot_data_dir + \
-                         args.model_name_or_path[2:] + \
-                         "/entropy_distri.npy"
-            if not os.path.exists(os.path.dirname(save_fname)):
-                os.makedirs(os.path.dirname(save_fname))
-            np.save(save_fname, np.array(entropy_collection))
+        if eval_highway and args.early_exit_entropy==-1:
+            # also record correctness per layer
+            save_path = args.plot_data_dir + \
+                         args.model_name_or_path[2:]
+            if not os.path.exists(save_path):
+                os.makedirs(save_path)
+            np.save(save_path + "/entropy_distri.npy", np.array(entropy_collection))
+            np.save(save_path + "/correctness_layer{}.npy".format(output_layer),
+                    np.array(np.argmax(preds, axis=1) == out_label_ids))
         eval_time = time.time() - st
         print("Eval time:", eval_time)
 
