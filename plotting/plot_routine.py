@@ -20,7 +20,8 @@ color = {
     "joint": 1,
     "alternating": 2,
     "weight-tok": 3,
-    "alternate-1": 4
+    "alternate-1": 4,
+    "limit": 5
 }
 
 def np_load(fname):
@@ -28,7 +29,7 @@ def np_load(fname):
 
 datasets = ["RTE", "MRPC", "SST-2", "QNLI", "QQP", "MNLI"]
 sizes = ["2.5k", "3.5k", "67k", "108k", "363k", "392k"]
-routines = ["two_stage", "all"] #, "all_alternate"]
+routines = ["two_stage", "all", "all_alternate", "limit"]
 
 rows = 2 # 2 for landscape, 3 for portrait
 M, N = rows, len(datasets)//rows

@@ -845,13 +845,19 @@ def main(args):
                 global_step, tr_loss = train(args, train_dataset, model, tokenizer,
                                              train_strategy='limit'+str(i))
                 result = evaluate(args, model, tokenizer, output_layer=i)
-                print(result)
+                print(i, result)
                 each_layer_results.append(get_wanted_result(result))
 
             each_layer_results.append(final_layer_result)
             experiment.log_other(
                 "Each layer result",
                 ' '.join([str(int(100 * x)) for x in each_layer_results]))
+
+            save_path = args.plot_data_dir + args.output_dir
+            if not os.path.exists(save_path):
+                os.makedirs(save_path)
+            np.save(save_path+"/each_layer.npy",
+                    np.array(each_layer_results))
             exit(0)
 
         else:
