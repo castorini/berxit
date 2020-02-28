@@ -520,6 +520,12 @@ class BertForSequenceClassification(BertPreTrainedModel):
             # loss (first entry of outputs), is no longer one variable, but a list of them
             if train_strategy == 'raw':
                 outputs = ([loss],) + outputs
+            elif train_strategy.startswith("limit"):
+                target_layer = int(train_strategy[5:])
+                if target_layer+1 == self.num_layers:
+                    outputs = ([loss],) + outputs
+                else:
+                    outputs = ([highway_losses[target_layer]],) + outputs
             elif train_strategy=='only_highway':
                 outputs = ([sum(highway_losses[:-1])],) + outputs
                 # exclude the final highway, of course

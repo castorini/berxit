@@ -141,7 +141,7 @@ def get_args():
                                  'half-pre_distil', 'half-distil', 'cascade',
                                  'full_divide', 'conf_cascade', 'raw1', 'all01', 'all0-1',
                                  'shrink', 'shrink-1', 'shsd-1', 'distil_only',
-                                 'all_alternate', 'alternate-1'],
+                                 'all_alternate', 'alternate-1', 'limit'],
                         default='raw', type=str,
                         help="Training routine (a routine can have mutliple stages, each with different strategies.")
 
@@ -236,7 +236,7 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
         t_total = len(train_dataloader) // args.gradient_accumulation_steps * args.num_train_epochs
 
     # calculate number of parameters
-    if True:
+    if False:
         counter = {
             "embedding": 0,
             "layernorm": 0,
@@ -286,7 +286,8 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
     elif train_strategy in ['all', 'self_distil', 'half', 'divide', 'full_divide',
                             'neigh_distil', 'half-pre_distil', 'half-distil',
                             'cascade', 'conf_cascade', 'shrink', 'shsd',
-                            'distil_only', 'alternate']:
+                            'distil_only', 'alternate'] \
+            or train_strategy.startswith("limit"):
         optimizer_grouped_parameters = [
             {'params': [p for n, p in model.named_parameters() if
                         not any(nd in n for nd in no_decay)],
@@ -824,6 +825,35 @@ def main(args):
                                          train_strategy=args.train_routine)
             logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
+        elif args.train_routine == 'limit':
+            each_layer_results = []
+
+            global_step, tr_loss = train(args, train_dataset, model, tokenizer,
+                                         train_strategy='raw')
+            result = evaluate(args, model, tokenizer)
+            print(result)
+            final_layer_result = get_wanted_result(result)
+            experiment.log_metric("final result", final_layer_result)
+
+            for i in range(model.num_layers-1):
+                model = model_class.from_pretrained(args.model_name_or_path,
+                                        from_tf=bool('.ckpt' in args.model_name_or_path),
+                                        config=config,
+                                        cache_dir=args.cache_dir if args.cache_dir else None)
+                model.to(args.device)
+
+                global_step, tr_loss = train(args, train_dataset, model, tokenizer,
+                                             train_strategy='limit'+str(i))
+                result = evaluate(args, model, tokenizer, output_layer=i)
+                print(result)
+                each_layer_results.append(get_wanted_result(result))
+
+            each_layer_results.append(final_layer_result)
+            experiment.log_other(
+                "Each layer result",
+                ' '.join([str(int(100 * x)) for x in each_layer_results]))
+            exit(0)
+
         else:
             raise NotImplementedError("Wrong training routine!")
 
@@ -900,12 +930,12 @@ def main(args):
             if args.early_exit_entropy == -1 and args.eval_each_highway:
                 last_layer_results = print_result
                 each_layer_results = []
-                for i in range(model.num_layers):
+                for i in range(model.num_layers-1):
                     logger.info("\n")
                     _result = evaluate(args, model, tokenizer, prefix=prefix,
                                        output_layer=i, eval_highway=args.eval_highway)
-                    if i + 1 < model.num_layers:
-                        each_layer_results.append(get_wanted_result(_result))
+                    # if i + 1 < model.num_layers:
+                    each_layer_results.append(get_wanted_result(_result))
                 each_layer_results.append(last_layer_results)
                 experiment.log_other(
                     "Each layer result",
