@@ -135,6 +135,8 @@ def get_args():
                         help="Linear warmup over warmup_steps.")
     parser.add_argument("--early_exit_entropy", default=-1, type=float,
                         help="Entropy threshold for early exit.")
+    parser.add_argument("--limit_layer", default="-1", type=str, required=False,
+                        help="The layer for limit training.")
     parser.add_argument("--train_routine",
                         choices=['raw', 'two_stage', 'all', 'self_distil',
                                  'layer_wise', 'half', 'divide', 'neigh_distil',
@@ -286,8 +288,7 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
     elif train_strategy in ['all', 'self_distil', 'half', 'divide', 'full_divide',
                             'neigh_distil', 'half-pre_distil', 'half-distil',
                             'cascade', 'conf_cascade', 'shrink', 'shsd',
-                            'distil_only', 'alternate'] \
-            or train_strategy.startswith("limit"):
+                            'distil_only', 'alternate', 'limit']:
         optimizer_grouped_parameters = [
             {'params': [p for n, p in model.named_parameters() if
                         not any(nd in n for nd in no_decay)],
@@ -389,7 +390,10 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
             if args.model_type != 'distilbert':
                 inputs['token_type_ids'] = batch[2] if args.model_type in ['bert',
                                                                            'xlnet'] else None  # XLM, DistilBERT and RoBERTa don't use segment_ids
-            inputs['train_strategy'] = train_strategy
+            if train_strategy=='limit':
+                inputs['train_strategy'] = train_strategy + args.limit_layer
+            else:
+                inputs['train_strategy'] = train_strategy
             inputs['layer_example_counter'] = layer_example_counter
             inputs['step_num'] = step
             outputs = model(**inputs)
@@ -820,45 +824,45 @@ def main(args):
 
         elif args.train_routine in ['half', 'self_distil', 'neigh_distil', 'divide',
                                     'full_divide', 'half-pre_distil', 'half_distil',
-                                    'cascade', 'conf_cascade', 'distil_only']:
+                                    'cascade', 'conf_cascade', 'distil_only', 'limit']:
             global_step, tr_loss = train(args, train_dataset, model, tokenizer,
                                          train_strategy=args.train_routine)
             logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
-        elif args.train_routine == 'limit':
-            each_layer_results = []
+        # elif args.train_routine == 'limit':
+        #     each_layer_results = []
 
-            global_step, tr_loss = train(args, train_dataset, model, tokenizer,
-                                         train_strategy='raw')
-            result = evaluate(args, model, tokenizer)
-            print(result)
-            final_layer_result = get_wanted_result(result)
-            experiment.log_metric("final result", final_layer_result)
+        #     global_step, tr_loss = train(args, train_dataset, model, tokenizer,
+        #                                  train_strategy='raw')
+        #     result = evaluate(args, model, tokenizer)
+        #     print(result)
+        #     final_layer_result = get_wanted_result(result)
+        #     experiment.log_metric("final result", final_layer_result)
 
-            for i in range(model.num_layers-1):
-                model = model_class.from_pretrained(args.model_name_or_path,
-                                        from_tf=bool('.ckpt' in args.model_name_or_path),
-                                        config=config,
-                                        cache_dir=args.cache_dir if args.cache_dir else None)
-                model.to(args.device)
+        #     for i in range(model.num_layers-1):
+        #         model = model_class.from_pretrained(args.model_name_or_path,
+        #                                 from_tf=bool('.ckpt' in args.model_name_or_path),
+        #                                 config=config,
+        #                                 cache_dir=args.cache_dir if args.cache_dir else None)
+        #         model.to(args.device)
 
-                global_step, tr_loss = train(args, train_dataset, model, tokenizer,
-                                             train_strategy='limit'+str(i))
-                result = evaluate(args, model, tokenizer, output_layer=i)
-                print(i, result)
-                each_layer_results.append(get_wanted_result(result))
+        #         global_step, tr_loss = train(args, train_dataset, model, tokenizer,
+        #                                      train_strategy='limit'+str(i))
+        #         result = evaluate(args, model, tokenizer, output_layer=i)
+        #         print(i, result)
+        #         each_layer_results.append(get_wanted_result(result))
 
-            each_layer_results.append(final_layer_result)
-            experiment.log_other(
-                "Each layer result",
-                ' '.join([str(int(100 * x)) for x in each_layer_results]))
+        #     each_layer_results.append(final_layer_result)
+        #     experiment.log_other(
+        #         "Each layer result",
+        #         ' '.join([str(int(100 * x)) for x in each_layer_results]))
 
-            save_path = args.plot_data_dir + args.output_dir
-            if not os.path.exists(save_path):
-                os.makedirs(save_path)
-            np.save(save_path+"/each_layer.npy",
-                    np.array(each_layer_results))
-            exit(0)
+        #     save_path = args.plot_data_dir + args.output_dir
+        #     if not os.path.exists(save_path):
+        #         os.makedirs(save_path)
+        #     np.save(save_path+"/each_layer.npy",
+        #             np.array(each_layer_results))
+        #     exit(0)
 
         else:
             raise NotImplementedError("Wrong training routine!")
@@ -928,10 +932,13 @@ def main(args):
 
             model.to(args.device)
             result = evaluate(args, model, tokenizer, prefix=prefix,
-                              eval_highway=args.eval_highway)
+                              eval_highway=args.eval_highway,
+                              output_layer=int(args.limit_layer))
             print_result = get_wanted_result(result)
             print("result: {}".format(print_result))
             experiment.log_metric("final result", print_result)
+            if args.train_routine=='limit':
+                np.save(args.output_dir+'/limit.npy', np.array([print_result]))
 
             if args.early_exit_entropy == -1 and args.eval_each_highway:
                 last_layer_results = print_result

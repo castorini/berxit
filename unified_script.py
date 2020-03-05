@@ -1,5 +1,21 @@
 import sys
 import os
+import time
+import subprocess
+import numpy as np
+import comet_ml as cm
+
+
+
+log_folder = "logs"
+existed_experiments = []
+for x in os.listdir(log_folder):
+    num, suffix = x.split('.')
+    if num not in existed_experiments and num.isnumeric():
+        existed_experiments.append(num)
+filecount = len(existed_experiments)
+
+
 
 flavor, model, dataset, seed, routine, entropy, inter = sys.argv[1:]
 # flavor: raw, train_highway, eval_highway
@@ -94,13 +110,24 @@ best_epochs = {
     "roberta-large": 10
 }
 
-log_folder = "logs"
-existed_experiments = []
-for x in os.listdir(log_folder):
-    num, suffix = x.split('.')
-    if num not in existed_experiments and num.isnumeric():
-        existed_experiments.append(num)
-filecount = len(existed_experiments)
+
+
+
+
+def inter_run(script):
+    subprocess.run(script, shell=True)
+
+
+def submit_run(script, filecount):
+    with open("slurm_submit.sh", 'w') as f:
+        print(script, file=f)
+    if os.environ["HOSTNAME"]=='v':
+        subprocess.run("python v2_submit.py slurm_submit.sh " + str(filecount), shell=True)
+    else:
+        subprocess.run("python submit.py slurm_submit.sh " + str(filecount), shell=True)
+
+
+
 
 script_template = {
     "raw":
@@ -234,23 +261,91 @@ elif flavor == "entropy":
             filecount
         )
         script = script + "\\\n    --no_comet"
-        # print(script)
-        os.system(script)
+        inter_run(script)
         print("\n")
+    exit(0)
+elif flavor == 'limit':
+
+    experiment = cm.Experiment(project_name='highway',
+                               log_code=False,
+                               auto_output_logging=False,
+                               parse_args=False,
+                               auto_metric_logging=False)
+    experiment.log_parameters({
+        "log_id": filecount,
+        "model_and_size": model,
+        "train_routine": "limit",
+        "task_name": dataset
+    })
+
+    num_layers = 12 if 'base' in model else 24
+
+    each_layer_fname = './plotting/saved_models/{}/{}/limit-42/each_layer.npy'.format(model, dataset)
+    if os.path.exists(each_layer_fname):
+        each_layer_result = list(np.load(each_layer_fname))
+        i_start = len(each_layer_result)
+    else:
+        each_layer_result = []
+        i_start = 0
+        if not os.path.exists(os.path.dirname(each_layer_fname)):
+            os.makedirs(os.path.dirname(each_layer_fname))
+
+    for i in range(i_start, num_layers-1):
+    # for i in range(1):
+        script = script_template['train_highway'].format(
+            model[:model.index('-')],
+            model + ("-uncased" if "bert-" in model else ""),
+            dataset,
+            dataset,
+            best_learning_rate[model][dataset],
+            best_epochs[model],
+            seed,
+            model,
+            dataset,
+            routine + '-' + seed,
+            routine,
+            filecount if i==i_start else "debug"
+        )
+        script = script + "\\\n    --no_comet\\\n    --limit_layer {}".format(i)
+        print(script)
+
+        target_file = './saved_models/{}/{}/{}/limit.npy'.format(model, dataset, "limit-42")
+        if not os.path.exists(target_file):
+            start_time = -1
+        else:
+            start_time = os.path.getmtime(target_file)
+
+        if inter == "True":
+            inter_run(script)
+        else:
+            submit_run(script, filecount)
+
+        while True:
+            time.sleep(10)
+            if os.path.exists(target_file) and os.path.getmtime(target_file)>start_time:
+                break
+
+        npload = np.load(target_file)
+        each_layer_result.append(npload[0])
+        np.save(each_layer_fname, np.array(each_layer_result))
+    npload = np.load('./plotting/saved_models/{}/{}/{}/each_layer.npy'.format(model, dataset, "two_stage-42"))
+    each_layer_result.append(npload[-1])
+    np.save(each_layer_fname, np.array(each_layer_result))
+
+    experiment.log_metric("final result", each_layer_result[-1])
+    experiment.log_other(
+        "Each layer result",
+        ' '.join([str(int(100 * x)) for x in each_layer_result]))
+
     exit(0)
 else:
     print("Wrong flavor")
     exit(1)
 
+
+
 print(script)
 if inter == "True":
-    # interactive node
-    os.system(script)
+    inter_run(script)
 else:
-    # submit job
-    with open("slurm_submit.sh", 'w') as f:
-        print(script, file=f)
-    if os.environ["HOSTNAME"]=='v':
-        os.system("python v2_submit.py slurm_submit.sh " + str(filecount))
-    else:
-        os.system("python submit.py slurm_submit.sh " + str(filecount))
+    submit_run(script, filecount)
