@@ -143,7 +143,8 @@ def get_args():
                                  'half-pre_distil', 'half-distil', 'cascade',
                                  'full_divide', 'conf_cascade', 'raw1', 'all01', 'all0-1',
                                  'shrink', 'shrink-1', 'shsd-1', 'distil_only',
-                                 'all_alternate', 'alternate-1', 'limit'],
+                                 'all_alternate', 'alternate-1', 'limit',
+                                 'all_alternate-vlstm'],
                         default='raw', type=str,
                         help="Training routine (a routine can have mutliple stages, each with different strategies.")
 
@@ -237,8 +238,8 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
     else:
         t_total = len(train_dataloader) // args.gradient_accumulation_steps * args.num_train_epochs
 
-    # calculate number of parameters
-    if False:
+    calculate_number_of_parameters = False
+    if calculate_number_of_parameters:
         counter = {
             "embedding": 0,
             "layernorm": 0,
@@ -266,7 +267,16 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
 
     # Prepare optimizer and schedule (linear warmup and decay)
     no_decay = ['bias', 'LayerNorm.weight']
-    if train_strategy == 'raw':
+    if train_strategy.endswith('-vlstm'):
+        optimizer_grouped_parameters = [
+            {'params': [p for n, p in model.named_parameters() if
+                        ("vlstm" in n) and (not any(nd in n for nd in no_decay))],
+             'weight_decay': args.weight_decay},
+            {'params': [p for n, p in model.named_parameters() if
+                        ("vlstm" in n) and (any(nd in n for nd in no_decay))],
+             'weight_decay': 0.0}
+        ]
+    elif train_strategy == 'raw':
         # the original bert model
         optimizer_grouped_parameters = [
             {'params': [p for n, p in model.named_parameters() if
@@ -392,6 +402,8 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
                                                                            'xlnet'] else None  # XLM, DistilBERT and RoBERTa don't use segment_ids
             if train_strategy=='limit':
                 inputs['train_strategy'] = train_strategy + args.limit_layer
+            elif train_strategy.endswith('-vlstm'):
+                inputs['train_strategy'] = train_strategy[:-6] # remove -vlstm
             else:
                 inputs['train_strategy'] = train_strategy
             inputs['layer_example_counter'] = layer_example_counter
@@ -652,7 +664,8 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False):
 
 
 def main(args):
-    
+
+    args.vlstm = args.train_routine.endswith('-vlstm')
     experiment.log_parameters(vars(args))
     if 'saved_models' in args.model_name_or_path:
         model_and_size = args.model_name_or_path[
@@ -744,6 +757,9 @@ def main(args):
     if args.model_type == "bert":
         model.bert.encoder.set_early_exit_entropy(args.early_exit_entropy)
         model.bert.init_highway_pooler()
+        if args.train_routine.endswith("-vlstm"):
+            model.bert.encoder.init_vlstm()
+            args.train_routine = args.train_routine[:-6]
         if args.train_routine == 'raw1':
             model.bert.pooler.set_chosen_token(1)
         if args.train_routine == 'all01':
@@ -755,6 +771,9 @@ def main(args):
     else:
         model.roberta.encoder.set_early_exit_entropy(args.early_exit_entropy)
         model.roberta.init_highway_pooler()
+        if args.train_routine.endswith("-vlstm"):
+            model.bert.encoder.init_vlstm() # not implemented yet
+            args.train_routine = args.train_routine[:-6]
         if args.train_routine == 'raw1':
             model.roberta.pooler.set_chosen_token(1)
         if args.train_routine == 'all01':
@@ -829,40 +848,14 @@ def main(args):
                                          train_strategy=args.train_routine)
             logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
-        # elif args.train_routine == 'limit':
-        #     each_layer_results = []
+        elif args.train_routine.endswith("-vlstm"):
+            tokenizer = tokenizer_class.from_pretrained(args.output_dir,
+                                                        do_lower_case=args.do_lower_case)
+            model = model_class.from_pretrained(args.output_dir)
 
-        #     global_step, tr_loss = train(args, train_dataset, model, tokenizer,
-        #                                  train_strategy='raw')
-        #     result = evaluate(args, model, tokenizer)
-        #     print(result)
-        #     final_layer_result = get_wanted_result(result)
-        #     experiment.log_metric("final result", final_layer_result)
+            train(args, train_dataset, model, tokenizer,
+                  train_strategy=args.train_routine)
 
-        #     for i in range(model.num_layers-1):
-        #         model = model_class.from_pretrained(args.model_name_or_path,
-        #                                 from_tf=bool('.ckpt' in args.model_name_or_path),
-        #                                 config=config,
-        #                                 cache_dir=args.cache_dir if args.cache_dir else None)
-        #         model.to(args.device)
-
-        #         global_step, tr_loss = train(args, train_dataset, model, tokenizer,
-        #                                      train_strategy='limit'+str(i))
-        #         result = evaluate(args, model, tokenizer, output_layer=i)
-        #         print(i, result)
-        #         each_layer_results.append(get_wanted_result(result))
-
-        #     each_layer_results.append(final_layer_result)
-        #     experiment.log_other(
-        #         "Each layer result",
-        #         ' '.join([str(int(100 * x)) for x in each_layer_results]))
-
-        #     save_path = args.plot_data_dir + args.output_dir
-        #     if not os.path.exists(save_path):
-        #         os.makedirs(save_path)
-        #     np.save(save_path+"/each_layer.npy",
-        #             np.array(each_layer_results))
-        #     exit(0)
 
         else:
             raise NotImplementedError("Wrong training routine!")

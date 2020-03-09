@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 from torch.nn import CrossEntropyLoss, MSELoss
+import torch.nn.functional as F
 
 from .modeling_bert import BertLayer, BertLayerNorm, BertPreTrainedModel
 
@@ -55,8 +56,10 @@ class BertEmbeddings(nn.Module):
 class BertEncoder(nn.Module):
     def __init__(self, config):
         super(BertEncoder, self).__init__()
+        self.hidden_size = config.hidden_size
         self.output_attentions = config.output_attentions
         self.output_hidden_states = config.output_hidden_states
+        self.num_layers = config.num_hidden_layers
         self.layer = nn.ModuleList([BertLayer(config) for _ in range(config.num_hidden_layers)])
         self.highway = nn.ModuleList([BertHighway(config) for _ in range(config.num_hidden_layers)])
 
@@ -87,6 +90,16 @@ class BertEncoder(nn.Module):
             )
 
         self.early_exit_entropy = [-1 for _ in range(config.num_hidden_layers)]
+
+        self.vlstm = None
+
+    def init_vlstm(self):
+        self.vlstm_size = 2
+        self.vlstm = nn.LSTMCell(
+            input_size=2, #+self.hidden_size
+            hidden_size=self.vlstm_size
+        )
+        self.vlstm_classifier = nn.Linear(self.vlstm_size, 2)
 
     def set_early_exit_entropy(self, x):
         print(x)
@@ -142,6 +155,8 @@ class BertEncoder(nn.Module):
                 highway_exit = highway_exit + (highway_entropy,)  # logits, hidden_states(?), entropy
                 all_highway_exits = all_highway_exits + (highway_exit,)
 
+                # add LSTM early exit prediction here
+
                 if highway_entropy < self.early_exit_entropy[i]:
                     # weight_func = lambda x: torch.exp(-3 * x) - 0.5**3
                     # weight_func = lambda x: 2 - torch.exp(x)
@@ -164,7 +179,21 @@ class BertEncoder(nn.Module):
         if self.output_attentions:
             outputs = outputs + (all_attentions,)
 
-        outputs = outputs + (all_highway_exits,)
+        outputs = outputs + ({"highway": all_highway_exits},)
+        if self.vlstm is not None:
+            hc_tuple = None
+            vlstm_output = []
+            vlstm_classifier_output = []
+            for i in range(self.num_layers-1):
+                # vlstm_input = torch.cat(all_highway_exits[i], dim=1)
+                vlstm_input = all_highway_exits[i][0]
+                hc_tuple = self.vlstm(vlstm_input, hc_tuple)
+                vlstm_output.append(hc_tuple[0]) # copy might be necessary
+                vlstm_classifier_output.append(
+                    F.softmax(self.vlstm_classifier(hc_tuple[0]), dim=1)
+                )
+            outputs[-1]["vlstm"] = (vlstm_output, vlstm_classifier_output)
+
         return outputs  # last-layer hidden state, (all hidden states), (all attentions), all highway exits
 
 
@@ -416,6 +445,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
         super(BertForSequenceClassification, self).__init__(config)
         self.num_labels = config.num_labels
         self.num_layers = config.num_hidden_layers
+        self.hidden_size = config.hidden_size
 
         self.bert = BertModel(config)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
@@ -423,6 +453,8 @@ class BertForSequenceClassification(BertPreTrainedModel):
 
         self.init_weights()
         self.training_threshold = 0.1
+
+        self.lamb = 0
 
     def update_threshold(self, func):
         self.training_threshold = func(self.training_threshold)
@@ -472,7 +504,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
             # work with highway exits
             highway_losses = []
             goto_next_layer = []
-            for i, highway_exit in enumerate(outputs[-1]):
+            for i, highway_exit in enumerate(outputs[-1]["highway"]):
                 highway_logits = highway_exit[0]
                 if train_strategy=='cascade':
                     if i<self.num_layers-1:
@@ -518,7 +550,20 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 highway_losses.append(highway_loss)
 
             # loss (first entry of outputs), is no longer one variable, but a list of them
-            if train_strategy == 'raw':
+
+            if self.bert.encoder.vlstm is not None:
+                loss_fct = CrossEntropyLoss()
+                vlstm_loss = 0
+                for i in range(self.num_layers-1):
+                    vlstm_pred = outputs[-1]['vlstm'][1][i]
+                    vlstm_gold = torch.eq(
+                        torch.argmax(outputs[-1]['highway'][i][0], dim=1),
+                        labels
+                    ).long()
+                    vlstm_loss += loss_fct(vlstm_pred, vlstm_gold)
+                    vlstm_loss += self.lamb * torch.mean(vlstm_pred[:, 0])
+                outputs = ([vlstm_loss],) + outputs
+            elif train_strategy == 'raw':
                 outputs = ([loss],) + outputs
             elif train_strategy.startswith("limit"):
                 target_layer = int(train_strategy[5:])
@@ -543,13 +588,13 @@ class BertForSequenceClassification(BertPreTrainedModel):
             elif train_strategy == 'shsd':
                 # the following input_logits are before softmax
                 # final layer logits: logits
-                # logits from layer[i]: outputs[-1][i][0]
+                # logits from layer[i]: outputs[-1]["highway"][i][0]
                 temperature = 1.0
                 softmax_fct = nn.Softmax(dim=1)
                 teacher_softmax = softmax_fct(logits.detach()) / temperature
                 distil_losses = []
                 for i in range(self.num_layers - 1):
-                    student_softmax = softmax_fct(outputs[-1][i][0]) / temperature
+                    student_softmax = softmax_fct(outputs[-1]["highway"][i][0]) / temperature
                     distil_losses.append(
                         - temperature ** 2 * torch.sum(
                             teacher_softmax * torch.log(student_softmax))
@@ -571,13 +616,13 @@ class BertForSequenceClassification(BertPreTrainedModel):
             elif train_strategy=='self_distil':
                 # the following input_logits are before softmax
                 # final layer logits: logits
-                # logits from layer[i]: outputs[-1][i][0]
+                # logits from layer[i]: outputs[-1]["highway"][i][0]
                 temperature = 1.0
                 softmax_fct = nn.Softmax(dim=1)
                 teacher_softmax = softmax_fct(logits.detach()) / temperature
                 distil_losses = []
                 for i in range(self.num_layers-1):
-                    student_softmax = softmax_fct(outputs[-1][i][0]) / temperature
+                    student_softmax = softmax_fct(outputs[-1]["highway"][i][0]) / temperature
                     distil_losses.append(
                         - temperature**2 * torch.sum(
                             teacher_softmax * torch.log(student_softmax))
@@ -586,13 +631,13 @@ class BertForSequenceClassification(BertPreTrainedModel):
                           + outputs
             elif train_strategy=='neigh_distil':
                 # the following input_logits are before softmax
-                # logits from layer[i]: outputs[-1][i][0]
+                # logits from layer[i]: outputs[-1]["highway"][i][0]
                 temperature = 1.0
                 softmax_fct = nn.Softmax(dim=1)
                 distil_losses = []
                 for i in range(self.num_layers-1):
-                    teacher_softmax = softmax_fct(outputs[-1][i+1][0].detach()) / temperature
-                    student_softmax = softmax_fct(outputs[-1][i][0]) / temperature
+                    teacher_softmax = softmax_fct(outputs[-1]["highway"][i+1][0].detach()) / temperature
+                    student_softmax = softmax_fct(outputs[-1]["highway"][i][0]) / temperature
                     distil_losses.append(
                         - temperature**2 * torch.sum(
                             teacher_softmax * torch.log(student_softmax))
@@ -602,7 +647,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
             elif train_strategy=='distil_only':
                 # the following input_logits are before softmax
                 # final layer logits: logits
-                # logits from layer[i]: outputs[-1][i][0]
+                # logits from layer[i]: outputs[-1]["highway"][i][0]
                 if step_num%2==0:
                     outputs = ([loss],) + outputs
                 else:
@@ -611,7 +656,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
                     teacher_softmax = softmax_fct(logits.detach()) / temperature
                     distil_losses = []
                     for i in range(self.num_layers-1):
-                        student_softmax = softmax_fct(outputs[-1][i][0]) / temperature
+                        student_softmax = softmax_fct(outputs[-1]["highway"][i][0]) / temperature
                         distil_losses.append(
                             - temperature**2 * torch.sum(
                                 teacher_softmax * torch.log(student_softmax))
@@ -619,12 +664,12 @@ class BertForSequenceClassification(BertPreTrainedModel):
                     outputs = ([loss + sum(distil_losses)],) + outputs
             elif train_strategy=='half-pre_distil':
                 # the following input_logits are before softmax
-                # hidden_state after layer[i]: outputs[-1][i][1]
-                teacher_hidden = outputs[-1][-1][1].detach()
+                # hidden_state after layer[i]: outputs[-1]["highway"][i][1]
+                teacher_hidden = outputs[-1]["highway"][-1][1].detach()
                 distil_losses = []
                 for i in range(self.num_layers-1):
                     if i%2==1:
-                        student_hidden = outputs[-1][i][1]
+                        student_hidden = outputs[-1]["highway"][i][1]
                         distil_losses.append(
                             torch.sum((teacher_hidden-student_hidden) ** 2) * 1e-3
                         )
@@ -636,14 +681,14 @@ class BertForSequenceClassification(BertPreTrainedModel):
             elif train_strategy=='half-distil':
                 # the following input_logits are before softmax
                 # final layer logits: logits
-                # logits from layer[i]: outputs[-1][i][0]
+                # logits from layer[i]: ["highway"][i][0]
                 temperature = 1.0
                 softmax_fct = nn.Softmax(dim=1)
                 teacher_softmax = softmax_fct(logits.detach()) / temperature
                 distil_losses = []
                 for i in range(self.num_layers-1):
                     if i%2==1:
-                        student_softmax = softmax_fct(outputs[-1][i][0]) / temperature
+                        student_softmax = softmax_fct(outputs[-1]["highway"][i][0]) / temperature
                         distil_losses.append(
                             - temperature**2 * torch.sum(
                                 teacher_softmax * torch.log(student_softmax))

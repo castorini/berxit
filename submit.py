@@ -3,6 +3,7 @@ import sys
 import subprocess
 
 slurm_command = "srun --mem=12G -c 2 --gres=gpu:1 -p {} {} &> {} &"
+#slurm_command = "srun --mem=12G -c 2 --gres=gpu:1 -p {} -w gpu025 {} &> {} &"
 
 target_command = ""
 with open(sys.argv[1]) as f:
