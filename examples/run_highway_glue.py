@@ -522,6 +522,7 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
         out_label_ids = None
         exit_layer_counter = {(i + 1): 0 for i in range(model.num_layers)}
         entropy_collection = []
+        maxlogit_collection = []
         st = time.time()
         for batch in tqdm(eval_dataloader, desc="Evaluating"):
             model.eval()
@@ -539,6 +540,10 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
                 outputs = model(**inputs)
                 entropy_collection.append(
                     [x.cpu().item() for x in outputs[3][1][:-1]] + [outputs[3][0].cpu().item()]
+                )
+                maxlogit_collection.append(
+                    [torch.max(torch.softmax(x[0], dim=1)).cpu().item() for x in outputs[2]['highway'][:-1]] +\
+                    [torch.max(torch.softmax(outputs[1], dim=1)).cpu().item()]
                 )
                 if eval_highway:
                     exit_layer_counter[outputs[-1]] += 1
@@ -560,6 +565,7 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
             if not os.path.exists(save_path):
                 os.makedirs(save_path)
             np.save(save_path + "/entropy_distri.npy", np.array(entropy_collection))
+            np.save(save_path + "/maxlogit_distri.npy", np.array(maxlogit_collection))
             np.save(save_path + "/correctness_layer{}.npy".format(output_layer),
                     np.array(np.argmax(preds, axis=1) == out_label_ids))
         eval_time = time.time() - st
