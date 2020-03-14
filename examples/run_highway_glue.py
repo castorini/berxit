@@ -523,13 +523,8 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
         exit_layer_counter = {(i + 1): 0 for i in range(model.num_layers)}
         entropy_collection = []
         maxlogit_collection = []
-        measure_instance_time = False
-        if measure_instance_time:
-            instance_time = []
         st = time.time()
         for batch in tqdm(eval_dataloader, desc="Evaluating"):
-            if measure_instance_time:
-                instance_st = time.time()
             model.eval()
             batch = tuple(t.to(args.device) for t in batch)
 
@@ -564,8 +559,6 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
                 preds = np.append(preds, logits.detach().cpu().numpy(), axis=0)
                 out_label_ids = np.append(out_label_ids, inputs['labels'].detach().cpu().numpy(), axis=0)
 
-            if measure_instance_time:
-                instance_time.append(time.time()-instance_st)
 
         eval_time = time.time() - st
         print("Eval time:", eval_time)
@@ -580,9 +573,6 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
             np.save(save_path + "/maxlogit_distri.npy", np.array(maxlogit_collection))
             np.save(save_path + "/correctness_layer{}.npy".format(output_layer),
                     np.array(np.argmax(preds, axis=1) == out_label_ids))
-            if measure_instance_time:
-                np.save(save_path + "/instance_time.npy", np.array(instance_time))
-                exit(0)
 
         eval_loss = eval_loss / nb_eval_steps
         if args.output_mode == "classification":
