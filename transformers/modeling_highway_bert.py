@@ -94,12 +94,12 @@ class BertEncoder(nn.Module):
         self.vlstm = None
 
     def init_vlstm(self):
-        self.vlstm_size = 2
+        self.vlstm_size = 10
         self.vlstm = nn.LSTMCell(
-            input_size=2, #+self.hidden_size
+            input_size=self.hidden_size,
             hidden_size=self.vlstm_size
         )
-        self.vlstm_classifier = nn.Linear(self.vlstm_size, 2)
+        self.vlstm_classifier = nn.Linear(self.vlstm_size+2, 2) # +2 is for adding logits
 
     def set_early_exit_entropy(self, x):
         print(x)
@@ -186,11 +186,14 @@ class BertEncoder(nn.Module):
             vlstm_classifier_output = []
             for i in range(self.num_layers-1):
                 # vlstm_input = torch.cat(all_highway_exits[i], dim=1)
-                vlstm_input = all_highway_exits[i][0]
+                vlstm_input = all_highway_exits[i][1]
                 hc_tuple = self.vlstm(vlstm_input, hc_tuple)
                 vlstm_output.append(hc_tuple[0]) # copy might be necessary
+                vlstm_classifier_input = torch.cat([
+                    hc_tuple[0], all_highway_exits[i][0]
+                ], dim=1)
                 vlstm_classifier_output.append(
-                    F.softmax(self.vlstm_classifier(hc_tuple[0]), dim=1)
+                    F.softmax(self.vlstm_classifier(vlstm_classifier_input), dim=1)
                 )
             outputs[-1]["vlstm"] = (vlstm_output, vlstm_classifier_output)
 
@@ -454,7 +457,10 @@ class BertForSequenceClassification(BertPreTrainedModel):
         self.init_weights()
         self.training_threshold = 0.1
 
-        self.lamb = 0
+        # hyperparameters for calculating loss of Q-value prediction
+        self.alpha = 0.1
+        self.beta = 1.0
+        self.gamma = 1.0
 
     def update_threshold(self, func):
         self.training_threshold = func(self.training_threshold)
@@ -503,6 +509,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
 
             # work with highway exits
             highway_losses = []
+            raw_highway_losses = []
             goto_next_layer = []
             for i, highway_exit in enumerate(outputs[-1]["highway"]):
                 highway_logits = highway_exit[0]
@@ -532,7 +539,11 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 else:
                     loss_fct = CrossEntropyLoss(
                         reduction='none' if 'cascade' in train_strategy else 'mean')
+                    raw_loss_fct = CrossEntropyLoss(
+                        reduction='none')
                     highway_loss = loss_fct(highway_logits.view(-1, self.num_labels),
+                                            labels.view(-1))
+                    raw_highway_loss = raw_loss_fct(highway_logits.view(-1, self.num_labels),
                                             labels.view(-1))
                     if 'cascade' in train_strategy:
                         if i>0:
@@ -548,21 +559,30 @@ class BertForSequenceClassification(BertPreTrainedModel):
                             # loss = torch.mean(loss)
                         highway_loss = torch.mean(highway_loss)
                 highway_losses.append(highway_loss)
+                raw_highway_losses.append(raw_highway_loss)
 
             # loss (first entry of outputs), is no longer one variable, but a list of them
 
             if self.bert.encoder.vlstm is not None:
                 loss_fct = CrossEntropyLoss()
                 vlstm_loss = 0
-                for i in range(self.num_layers-1):
-                    vlstm_pred = outputs[-1]['vlstm'][1][i]
-                    vlstm_gold = torch.eq(
-                        torch.argmax(outputs[-1]['highway'][i][0], dim=1),
-                        labels
-                    ).long()
-                    vlstm_loss += loss_fct(vlstm_pred, vlstm_gold)
-                    vlstm_loss += self.lamb * torch.mean(vlstm_pred[:, 0])
-                outputs = ([vlstm_loss],) + outputs
+                for i in range(self.num_layers-2):
+                    # why -2 ?
+                    # 1. the last layer doesn't have a highway/vlstm
+                    # 2. we need the output from layer i+1 for the loss
+                    Q_this = outputs[-1]['vlstm'][1][i]    # Q_i
+                    Q_next = outputs[-1]['vlstm'][1][i+1]  # Q_{i+1}
+                    Q_next = torch.max(Q_next, dim=1)[0].repeat(2, 1).t()  # this 2 is bad
+                    a_0_reward = torch.tensor([-self.alpha * i]).to(Q_this.device)  # reward for continue
+                    r_this = torch.stack([
+                        a_0_reward.repeat(Q_this.shape[0]),
+                        - self.beta * raw_highway_losses[i].detach()
+                    ], dim=1)
+                    vlstm_loss += torch.mean(
+                        (r_this + self.gamma*Q_next - Q_this) ** 2)
+                    if i==6 and step_num>=100:
+                        breakpoint()
+                outputs = ([vlstm_loss/(self.num_layers-2)],) + outputs
             elif train_strategy == 'raw':
                 outputs = ([loss],) + outputs
             elif train_strategy.startswith("limit"):

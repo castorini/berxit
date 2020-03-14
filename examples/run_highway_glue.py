@@ -389,7 +389,7 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
     fout = open(args.output_dir + "/layer_example_counter", 'w')
 
     for epoch_num in train_iterator:
-        epoch_iterator = tqdm(train_dataloader, desc="Iteration", disable=args.local_rank not in [-1, 0])
+        epoch_iterator = tqdm(train_dataloader, desc="Iteration", disable=True)#args.local_rank not in [-1, 0])
         layer_example_counter = {i: 0 for i in range(model.num_layers + 1)}
         for step, batch in enumerate(epoch_iterator):
             model.train()
@@ -427,6 +427,7 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
                 else:
                     loss.backward(retain_graph=True)
                 tr_loss += loss.item()
+                print(loss.item())
                 if (step + 1) % args.gradient_accumulation_steps == 0:
                     if args.fp16:
                         torch.nn.utils.clip_grad_norm_(amp.master_params(optimizer), args.max_grad_norm)
@@ -766,9 +767,6 @@ def main(args):
     if args.model_type == "bert":
         model.bert.encoder.set_early_exit_entropy(args.early_exit_entropy)
         model.bert.init_highway_pooler()
-        if args.train_routine.endswith("-vlstm"):
-            model.bert.encoder.init_vlstm()
-            args.train_routine = args.train_routine[:-6]
         if args.train_routine == 'raw1':
             model.bert.pooler.set_chosen_token(1)
         if args.train_routine == 'all01':
@@ -780,9 +778,6 @@ def main(args):
     else:
         model.roberta.encoder.set_early_exit_entropy(args.early_exit_entropy)
         model.roberta.init_highway_pooler()
-        if args.train_routine.endswith("-vlstm"):
-            model.bert.encoder.init_vlstm() # not implemented yet
-            args.train_routine = args.train_routine[:-6]
         if args.train_routine == 'raw1':
             model.roberta.pooler.set_chosen_token(1)
         if args.train_routine == 'all01':
@@ -858,10 +853,18 @@ def main(args):
             logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
         elif args.train_routine.endswith("-vlstm"):
-            tokenizer = tokenizer_class.from_pretrained(args.output_dir,
+            non_vlstm_output_dir = args.output_dir.replace('-vlstm', '')
+            tokenizer = tokenizer_class.from_pretrained(non_vlstm_output_dir,
                                                         do_lower_case=args.do_lower_case)
-            model = model_class.from_pretrained(args.output_dir)
+            model = model_class.from_pretrained(non_vlstm_output_dir)
 
+            if args.model_type == 'bert':
+                model.bert.encoder.init_vlstm()
+            else:
+                # not implemented yet
+                model.roberta.encoder.init_vlstm()
+
+            model.to(args.device)
             train(args, train_dataset, model, tokenizer,
                   train_strategy=args.train_routine)
 
