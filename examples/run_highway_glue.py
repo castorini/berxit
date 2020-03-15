@@ -388,12 +388,13 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
         os.makedirs(args.output_dir)
     fout = open(args.output_dir + "/layer_example_counter", 'w')
 
-    print_loss_switch = False
+    print_loss_switch = False  # only True for debugging
     tqdm_disable = print_loss_switch or (args.local_rank not in [-1, 0])
 
     for epoch_num in train_iterator:
         epoch_iterator = tqdm(train_dataloader, desc="Iteration", disable=tqdm_disable)
         layer_example_counter = {i: 0 for i in range(model.num_layers + 1)}
+        cumu_loss = 0.0
         for step, batch in enumerate(epoch_iterator):
             model.train()
             batch = tuple(t.to(args.device) for t in batch)
@@ -429,7 +430,9 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
                     loss.backward(retain_graph=True)
                 tr_loss += loss.item()
                 if print_loss_switch and step%10==0:
-                    print(loss.item())
+                    print(cumu_loss/10)
+                    cumu_loss = 0
+                cumu_loss += loss.item()
                 if (step + 1) % args.gradient_accumulation_steps == 0:
                     if args.fp16:
                         torch.nn.utils.clip_grad_norm_(amp.master_params(optimizer), args.max_grad_norm)

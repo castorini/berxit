@@ -460,8 +460,8 @@ class BertForSequenceClassification(BertPreTrainedModel):
         self.training_threshold = 0.1
 
         # hyperparameters for balancing loss
-        self.alpha = 0.1
-        self.beta = 1.0
+        self.alpha = 0.2
+        self.beta = 0.6
         self.gamma = 1.0
         self.lamb = 0.0
 
@@ -512,7 +512,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
 
             # work with highway exits
             highway_losses = []
-            raw_highway_losses = []
+            # raw_highway_losses = []
             goto_next_layer = []
             for i, highway_exit in enumerate(outputs[-1]["highway"]):
                 highway_logits = highway_exit[0]
@@ -542,12 +542,12 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 else:
                     loss_fct = CrossEntropyLoss(
                         reduction='none' if 'cascade' in train_strategy else 'mean')
-                    raw_loss_fct = CrossEntropyLoss(
-                        reduction='none')
+                    # raw_loss_fct = CrossEntropyLoss(
+                    #     reduction='none')
                     highway_loss = loss_fct(highway_logits.view(-1, self.num_labels),
                                             labels.view(-1))
-                    raw_highway_loss = raw_loss_fct(highway_logits.view(-1, self.num_labels),
-                                            labels.view(-1))
+                    # raw_highway_loss = raw_loss_fct(highway_logits.view(-1, self.num_labels),
+                    #                         labels.view(-1))
                     if 'cascade' in train_strategy:
                         if i>0:
                             highway_loss = torch.masked_select(
@@ -562,7 +562,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
                             # loss = torch.mean(loss)
                         highway_loss = torch.mean(highway_loss)
                 highway_losses.append(highway_loss)
-                raw_highway_losses.append(raw_highway_loss)
+                # raw_highway_losses.append(raw_highway_loss)
 
             # loss (first entry of outputs), is no longer one variable, but a list of them
 
@@ -586,12 +586,12 @@ class BertForSequenceClassification(BertPreTrainedModel):
                         torch.argmax(outputs[-1]['highway'][i][0], dim=1),
                         labels
                     ).long()  # 0 for wrong/continue, 1 for right/exit
-                    # vlstm_gold is just for debugging - Q_this should align with it
-                    Q_this = outputs[-1]['vlstm'][1][i]    # Q_i
+                    Q_this = outputs[-1]['vlstm'][1][i]  # Q_i
                     a_0_reward = torch.tensor([-self.alpha]).to(Q_this.device)  # reward for continue
                     r_this = torch.stack([
                         a_0_reward.repeat(Q_this.shape[0]),
-                        - self.beta * raw_highway_losses[i].detach()
+                        - self.beta * (1 - vlstm_gold.float())
+                        # - self.beta * raw_highway_losses[i].detach()
                     ], dim=1)
                     if i == self.num_layers-2:
                         vlstm_loss += torch.mean(
@@ -606,7 +606,6 @@ class BertForSequenceClassification(BertPreTrainedModel):
                     #     print(i)
                     #     print(Q_this)
                     #     print(r_this)
-                    #     print(Q_next)
                 outputs = ([vlstm_loss],) + outputs
             elif train_strategy == 'raw':
                 outputs = ([loss],) + outputs
