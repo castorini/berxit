@@ -93,13 +93,15 @@ class BertEncoder(nn.Module):
 
         self.vlstm = None
 
-    def init_vlstm(self):
+    def init_vlstm(self, Q=False):
+        self.vlstm_Q = Q
         self.vlstm_size = 10
         self.vlstm = nn.LSTMCell(
             input_size=self.hidden_size,
             hidden_size=self.vlstm_size
         )
         self.vlstm_classifier = nn.Linear(self.vlstm_size+2, 2) # +2 is for adding logits
+        self.vlstm_activation = nn.Tanh() if Q else nn.Softmax(dim=1)
 
     def set_early_exit_entropy(self, x):
         print(x)
@@ -192,9 +194,9 @@ class BertEncoder(nn.Module):
                 vlstm_classifier_input = torch.cat([
                     hc_tuple[0], all_highway_exits[i][0]
                 ], dim=1)
-                vlstm_classifier_output.append(
-                    F.softmax(self.vlstm_classifier(vlstm_classifier_input), dim=1)
-                )
+                vlstm_classifier_output.append(self.vlstm_activation(
+                    self.vlstm_classifier(vlstm_classifier_input)
+                ))
             outputs[-1]["vlstm"] = (vlstm_output, vlstm_classifier_output)
 
         return outputs  # last-layer hidden state, (all hidden states), (all attentions), all highway exits
@@ -457,10 +459,11 @@ class BertForSequenceClassification(BertPreTrainedModel):
         self.init_weights()
         self.training_threshold = 0.1
 
-        # hyperparameters for calculating loss of Q-value prediction
+        # hyperparameters for balancing loss
         self.alpha = 0.1
         self.beta = 1.0
         self.gamma = 1.0
+        self.lamb = 0.0
 
     def update_threshold(self, func):
         self.training_threshold = func(self.training_threshold)
@@ -563,26 +566,48 @@ class BertForSequenceClassification(BertPreTrainedModel):
 
             # loss (first entry of outputs), is no longer one variable, but a list of them
 
-            if self.bert.encoder.vlstm is not None:
-                loss_fct = CrossEntropyLoss()
+            if train_strategy.endswith("-vlstm"):
+                # basically doesn't work
                 vlstm_loss = 0
-                for i in range(self.num_layers-2):
-                    # why -2 ?
-                    # 1. the last layer doesn't have a highway/vlstm
-                    # 2. we need the output from layer i+1 for the loss
+                loss_fct = CrossEntropyLoss()
+                for i in range(self.num_layers - 1):
+                    vlstm_pred = outputs[-1]['vlstm'][1][i]
+                    vlstm_gold = torch.eq(
+                        torch.argmax(outputs[-1]['highway'][i][0], dim=1),
+                        labels
+                    ).long()  # 0 for wrong/continue, 1 for right/exit
+                    vlstm_loss += loss_fct(vlstm_pred, vlstm_gold)
+                    vlstm_loss += self.lamb * torch.mean(vlstm_pred[:, 0])
+                outputs = ([vlstm_loss],) + outputs
+            elif train_strategy.endswith("-Qvlstm"):
+                vlstm_loss = 0
+                for i in range(self.num_layers-1):
+                    vlstm_gold = torch.eq(
+                        torch.argmax(outputs[-1]['highway'][i][0], dim=1),
+                        labels
+                    ).long()  # 0 for wrong/continue, 1 for right/exit
+                    # vlstm_gold is just for debugging - Q_this should align with it
                     Q_this = outputs[-1]['vlstm'][1][i]    # Q_i
-                    Q_next = outputs[-1]['vlstm'][1][i+1]  # Q_{i+1}
-                    Q_next = torch.max(Q_next, dim=1)[0].repeat(2, 1).t()  # this 2 is bad
-                    a_0_reward = torch.tensor([-self.alpha * i]).to(Q_this.device)  # reward for continue
+                    a_0_reward = torch.tensor([-self.alpha]).to(Q_this.device)  # reward for continue
                     r_this = torch.stack([
                         a_0_reward.repeat(Q_this.shape[0]),
                         - self.beta * raw_highway_losses[i].detach()
                     ], dim=1)
-                    vlstm_loss += torch.mean(
-                        (r_this + self.gamma*Q_next - Q_this) ** 2)
-                    if i==6 and step_num>=100:
-                        breakpoint()
-                outputs = ([vlstm_loss/(self.num_layers-2)],) + outputs
+                    if i == self.num_layers-2:
+                        vlstm_loss += torch.mean(
+                            (r_this - Q_this) ** 2
+                        )
+                    else:
+                        Q_next = outputs[-1]['vlstm'][1][i+1]  # Q_{i+1}
+                        Q_next = torch.max(Q_next, dim=1)[0].repeat(2, 1).t()  # this 2 is bad
+                        vlstm_loss += torch.mean(
+                            (r_this + self.gamma*Q_next - Q_this) ** 2)
+                    # if step_num==130:
+                    #     print(i)
+                    #     print(Q_this)
+                    #     print(r_this)
+                    #     print(Q_next)
+                outputs = ([vlstm_loss],) + outputs
             elif train_strategy == 'raw':
                 outputs = ([loss],) + outputs
             elif train_strategy.startswith("limit"):

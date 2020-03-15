@@ -144,7 +144,7 @@ def get_args():
                                  'full_divide', 'conf_cascade', 'raw1', 'all01', 'all0-1',
                                  'shrink', 'shrink-1', 'shsd-1', 'distil_only',
                                  'all_alternate', 'alternate-1', 'limit',
-                                 'all_alternate-vlstm'],
+                                 'all_alternate-vlstm', 'all_alternate-Qvlstm'],
                         default='raw', type=str,
                         help="Training routine (a routine can have mutliple stages, each with different strategies.")
 
@@ -267,7 +267,7 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
 
     # Prepare optimizer and schedule (linear warmup and decay)
     no_decay = ['bias', 'LayerNorm.weight']
-    if train_strategy.endswith('-vlstm'):
+    if train_strategy.endswith('-vlstm') or train_strategy.endswith('-Qvlstm'):
         optimizer_grouped_parameters = [
             {'params': [p for n, p in model.named_parameters() if
                         ("vlstm" in n) and (not any(nd in n for nd in no_decay))],
@@ -388,8 +388,11 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
         os.makedirs(args.output_dir)
     fout = open(args.output_dir + "/layer_example_counter", 'w')
 
+    print_loss_switch = False
+    tqdm_disable = print_loss_switch or (args.local_rank not in [-1, 0])
+
     for epoch_num in train_iterator:
-        epoch_iterator = tqdm(train_dataloader, desc="Iteration", disable=True)#args.local_rank not in [-1, 0])
+        epoch_iterator = tqdm(train_dataloader, desc="Iteration", disable=tqdm_disable)
         layer_example_counter = {i: 0 for i in range(model.num_layers + 1)}
         for step, batch in enumerate(epoch_iterator):
             model.train()
@@ -402,8 +405,6 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
                                                                            'xlnet'] else None  # XLM, DistilBERT and RoBERTa don't use segment_ids
             if train_strategy=='limit':
                 inputs['train_strategy'] = train_strategy + args.limit_layer
-            elif train_strategy.endswith('-vlstm'):
-                inputs['train_strategy'] = train_strategy[:-6] # remove -vlstm
             else:
                 inputs['train_strategy'] = train_strategy
             inputs['layer_example_counter'] = layer_example_counter
@@ -427,7 +428,8 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
                 else:
                     loss.backward(retain_graph=True)
                 tr_loss += loss.item()
-                print(loss.item())
+                if print_loss_switch and step%10==0:
+                    print(loss.item())
                 if (step + 1) % args.gradient_accumulation_steps == 0:
                     if args.fp16:
                         torch.nn.utils.clip_grad_norm_(amp.master_params(optimizer), args.max_grad_norm)
@@ -675,7 +677,6 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False):
 
 def main(args):
 
-    args.vlstm = args.train_routine.endswith('-vlstm')
     experiment.log_parameters(vars(args))
     if 'saved_models' in args.model_name_or_path:
         model_and_size = args.model_name_or_path[
@@ -852,17 +853,18 @@ def main(args):
                                          train_strategy=args.train_routine)
             logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
-        elif args.train_routine.endswith("-vlstm"):
-            non_vlstm_output_dir = args.output_dir.replace('-vlstm', '')
+        elif args.train_routine.endswith("-vlstm") or \
+             args.train_routine.endswith("-Qvlstm"):
+            non_vlstm_output_dir = args.output_dir.replace('-vlstm', '').replace('-Qvlstm', '')
             tokenizer = tokenizer_class.from_pretrained(non_vlstm_output_dir,
                                                         do_lower_case=args.do_lower_case)
             model = model_class.from_pretrained(non_vlstm_output_dir)
 
             if args.model_type == 'bert':
-                model.bert.encoder.init_vlstm()
+                model.bert.encoder.init_vlstm(Q=args.train_routine.endswith('-Qvlstm'))
             else:
                 # not implemented yet
-                model.roberta.encoder.init_vlstm()
+                model.roberta.encoder.init_vlstm(Q=args.train_routine.endswith('-Qvlstm'))
 
             model.to(args.device)
             train(args, train_dataset, model, tokenizer,
