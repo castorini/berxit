@@ -779,6 +779,14 @@ def main(args):
         if args.train_routine in ['all0-1', 'shrink-1', 'shsd-1', 'alternate-1']:
             for i in range(model.num_layers):
                 model.bert.encoder.highway[i].pooler.set_chosen_token(-1)
+        if args.train_routine.endswith("vlstm"):
+            non_vlstm_output_dir = args.output_dir.replace('-vlstm', '').replace('-Qvlstm', '')
+            tokenizer = tokenizer_class.from_pretrained(non_vlstm_output_dir,
+                                                        do_lower_case=args.do_lower_case)
+            model = model_class.from_pretrained(non_vlstm_output_dir)
+            model.bert.encoder.enable_vlstm(Q=args.train_routine.endswith('-Qvlstm'))
+            model.to(args.device)
+
     else:
         model.roberta.encoder.set_early_exit_entropy(args.early_exit_entropy)
         model.roberta.init_highway_pooler()
@@ -790,6 +798,14 @@ def main(args):
         if args.train_routine in ['all0-1', 'shrink-1', 'shsd-1', 'alternate-1']:
             for i in range(model.num_layers):
                 model.roberta.encoder.highway[i].pooler.set_chosen_token(-1)
+        if args.train_routine.endswith("vlstm"):
+            non_vlstm_output_dir = args.output_dir.replace('-vlstm', '').replace('-Qvlstm', '')
+            tokenizer = tokenizer_class.from_pretrained(non_vlstm_output_dir,
+                                                        do_lower_case=args.do_lower_case)
+            model = model_class.from_pretrained(non_vlstm_output_dir)
+            model.bert.encoder.enable_vlstm(Q=args.train_routine.endswith('-Qvlstm'))
+            model.to(args.device)
+
 
     if args.local_rank == 0:
         torch.distributed.barrier()  # Make sure only the first process in distributed training will download model & vocab
@@ -858,18 +874,7 @@ def main(args):
 
         elif args.train_routine.endswith("-vlstm") or \
              args.train_routine.endswith("-Qvlstm"):
-            non_vlstm_output_dir = args.output_dir.replace('-vlstm', '').replace('-Qvlstm', '')
-            tokenizer = tokenizer_class.from_pretrained(non_vlstm_output_dir,
-                                                        do_lower_case=args.do_lower_case)
-            model = model_class.from_pretrained(non_vlstm_output_dir)
 
-            if args.model_type == 'bert':
-                model.bert.encoder.init_vlstm(Q=args.train_routine.endswith('-Qvlstm'))
-            else:
-                # not implemented yet
-                model.roberta.encoder.init_vlstm(Q=args.train_routine.endswith('-Qvlstm'))
-
-            model.to(args.device)
             train(args, train_dataset, model, tokenizer,
                   train_strategy=args.train_routine)
 
@@ -941,6 +946,27 @@ def main(args):
                         model.roberta.encoder.highway[i].pooler.set_chosen_token(-1)
 
             model.to(args.device)
+            if args.train_routine.endswith('-vlstm'):
+                if args.model_type=='bert':
+                    model.bert.encoder.enable_vlstm()
+                else:
+                    model.roberta.encoder.enable_vlstm()
+                experiment.log_other(
+                    'note',
+                    f'la={model.lamb}'
+                )
+                args.eval_highway, args.early_exit_entropy = True, 1.0 # triggers ERS measurement
+            elif args.train_routine.endswith('-Qvlstm'):
+                if args.model_type=='bert':
+                    model.bert.encoder.enable_vlstm(Q=True)
+                else:
+                    model.roberta.encoder.enable_vlstm(Q=True)
+                experiment.log_other(
+                    'note',
+                    f'al={model.alpha} be={model.beta} ga={model.gamma}'
+                )
+                args.eval_highway, args.early_exit_entropy = True, 1.0 # triggers ERS measurement
+
             result = evaluate(args, model, tokenizer, prefix=prefix,
                               eval_highway=args.eval_highway,
                               output_layer=int(args.limit_layer))

@@ -91,17 +91,22 @@ class BertEncoder(nn.Module):
 
         self.early_exit_entropy = [-1 for _ in range(config.num_hidden_layers)]
 
-        self.vlstm = None
+        self.use_vlstm = False
+        self.init_vlstm()
 
-    def init_vlstm(self, Q=False):
-        self.vlstm_Q = Q
+    def init_vlstm(self):
         self.vlstm_size = 10
         self.vlstm = nn.LSTMCell(
             input_size=self.hidden_size,
             hidden_size=self.vlstm_size
         )
-        self.vlstm_classifier = nn.Linear(self.vlstm_size+2, 2) # +2 is for adding logits
+        self.vlstm_classifier = nn.Linear(self.vlstm_size + 2, 2)  # +2 is for adding logits
+        self.vlstm_activation = nn.Tanh()
+
+    def enable_vlstm(self, Q=False):
+        self.use_vlstm = True
         self.vlstm_activation = nn.Tanh() if Q else nn.Softmax(dim=1)
+        print(f'vlstm initialized, Q={Q}')
 
     def set_early_exit_entropy(self, x):
         print(x)
@@ -121,6 +126,11 @@ class BertEncoder(nn.Module):
         all_hidden_states = ()
         all_attentions = ()
         all_highway_exits = ()
+
+        vlstm_hc_tuple = None
+        vlstm_outputs = []
+        vlstm_classifier_outputs = []
+
         for i, layer_module in enumerate(self.layer):
             if self.output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_states,)
@@ -139,6 +149,7 @@ class BertEncoder(nn.Module):
             if self.output_attentions:
                 current_outputs = current_outputs + (all_attentions,)
 
+            # the block for highway
             if self.divide == 'divide':
                 highway_exit = self.highway[i](
                     (current_outputs[0]*self.mask,) + current_outputs[1:]
@@ -149,7 +160,20 @@ class BertEncoder(nn.Module):
                 )
             else:
                 highway_exit = self.highway[i](current_outputs)
-            # logits, pooled_output
+                # logits, pooled_output
+
+            # the block for vlstm
+            if self.use_vlstm:
+                vlstm_input = highway_exit[1]
+                vlstm_hc_tuple = self.vlstm(vlstm_input, vlstm_hc_tuple)
+                vlstm_outputs.append(vlstm_hc_tuple[0])
+                vlstm_classifier_input = torch.cat([
+                    vlstm_hc_tuple[0], highway_exit[0]
+                ], dim=1)
+                vlstm_classifier_output = self.vlstm_activation(
+                    self.vlstm_classifier(vlstm_classifier_input)
+                )
+                vlstm_classifier_outputs.append(vlstm_classifier_output)
 
             if not self.training:
                 highway_logits = highway_exit[0]
@@ -157,16 +181,16 @@ class BertEncoder(nn.Module):
                 highway_exit = highway_exit + (highway_entropy,)  # logits, hidden_states(?), entropy
                 all_highway_exits = all_highway_exits + (highway_exit,)
 
-                # add LSTM early exit prediction here
-
-                if highway_entropy < self.early_exit_entropy[i]:
+                if (self.use_vlstm and torch.argmax(vlstm_classifier_output)==1) or \
+                   ((not self.use_vlstm) and highway_entropy < self.early_exit_entropy):
                     # weight_func = lambda x: torch.exp(-3 * x) - 0.5**3
                     # weight_func = lambda x: 2 - torch.exp(x)
                     # weighted_logits = \
                     #     sum([weight_func(x[2]) * x[0] for x in all_highway_exits]) /\
                     #     sum([weight_func(x[2]) for x in all_highway_exits])
                     # new_output = (weighted_logits,) + current_outputs[1:] + (all_highway_exits,)
-                    new_output = (highway_logits,) + current_outputs[1:] + (all_highway_exits,)
+                    new_output = (highway_logits,) + current_outputs[1:] + \
+                                 ({'highway': all_highway_exits},)
                     raise HighwayException(new_output, i+1)
             else:
                 all_highway_exits = all_highway_exits + (highway_exit,)
@@ -182,22 +206,8 @@ class BertEncoder(nn.Module):
             outputs = outputs + (all_attentions,)
 
         outputs = outputs + ({"highway": all_highway_exits},)
-        if self.vlstm is not None:
-            hc_tuple = None
-            vlstm_output = []
-            vlstm_classifier_output = []
-            for i in range(self.num_layers-1):
-                # vlstm_input = torch.cat(all_highway_exits[i], dim=1)
-                vlstm_input = all_highway_exits[i][1]
-                hc_tuple = self.vlstm(vlstm_input, hc_tuple)
-                vlstm_output.append(hc_tuple[0]) # copy might be necessary
-                vlstm_classifier_input = torch.cat([
-                    hc_tuple[0], all_highway_exits[i][0]
-                ], dim=1)
-                vlstm_classifier_output.append(self.vlstm_activation(
-                    self.vlstm_classifier(vlstm_classifier_input)
-                ))
-            outputs[-1]["vlstm"] = (vlstm_output, vlstm_classifier_output)
+        if self.use_vlstm:
+            outputs[-1]["vlstm"] = (vlstm_outputs, vlstm_classifier_outputs)
 
         return outputs  # last-layer hidden state, (all hidden states), (all attentions), all highway exits
 
@@ -460,8 +470,8 @@ class BertForSequenceClassification(BertPreTrainedModel):
         self.training_threshold = 0.1
 
         # hyperparameters for balancing loss
-        self.alpha = 0.2
-        self.beta = 0.6
+        self.alpha = 0.15
+        self.beta = 0.7
         self.gamma = 1.0
         self.lamb = 0.0
 
