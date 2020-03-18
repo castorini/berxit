@@ -219,7 +219,9 @@ def set_seed(args):
 
 
 def get_wanted_result(result):
-    if "f1" in result:
+    if "spearmanr" in result:
+        print_result = result["spearmanr"]
+    elif "f1" in result:
         print_result = result["f1"]
     elif "mcc" in result:
         print_result = result["mcc"]
@@ -607,6 +609,8 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
                 vlstm_save_fname = args.plot_data_dir + \
                                    args.output_dir + \
                                    "/vlstm.npy"
+                if not os.path.exists(os.path.dirname(vlstm_save_fname)):
+                    os.makedirs(os.path.dirname(vlstm_save_fname))
                 if not os.path.exists(vlstm_save_fname):
                     prev_saver = []
                 else:

@@ -92,6 +92,7 @@ class BertEncoder(nn.Module):
         self.early_exit_entropy = [-1 for _ in range(config.num_hidden_layers)]
 
         self.use_vlstm = False
+        self.regression_task = False # only True for using Qvlstm for evaluation
         self.init_vlstm()
 
     def init_vlstm(self):
@@ -119,6 +120,8 @@ class BertEncoder(nn.Module):
             self.gamma = args.gamma
         if args.lamb is not None:
             self.lamb = args.lamb
+        if args.task_name in ['sts-b']:
+            self.regression_task = True
 
         self.use_vlstm = True
         self.vlstm_activation = nn.Tanh() if Q else nn.Softmax(dim=1)
@@ -183,9 +186,19 @@ class BertEncoder(nn.Module):
                 vlstm_input = highway_exit[1]
                 vlstm_hc_tuple = self.vlstm(vlstm_input, vlstm_hc_tuple)
                 vlstm_outputs.append(vlstm_hc_tuple[0])
-                vlstm_classifier_input = torch.cat([
-                    vlstm_hc_tuple[0], highway_exit[0]
-                ], dim=1)
+                if self.regression_task:
+                    # an extra zero-vector for shape consistence
+                    vlstm_classifier_input = torch.cat([
+                        vlstm_hc_tuple[0],
+                        highway_exit[0],
+                        torch.tensor([[0.0] for _ in range(highway_exit[0].shape[0])]).to(highway_exit[0].device)
+                    ], dim=1)
+                else:
+                    vlstm_classifier_input = torch.cat([
+                        vlstm_hc_tuple[0],
+                        highway_exit[0]
+                    ], dim=1)
+                # breakpoint()
                 vlstm_classifier_output = self.vlstm_activation(
                     self.vlstm_classifier(vlstm_classifier_input)
                 )
@@ -198,7 +211,7 @@ class BertEncoder(nn.Module):
                 all_highway_exits = all_highway_exits + (highway_exit,)
 
                 if (self.use_vlstm and torch.argmax(vlstm_classifier_output)==1) or \
-                   ((not self.use_vlstm) and highway_entropy < self.early_exit_entropy):
+                   ((not self.use_vlstm) and highway_entropy < self.early_exit_entropy[i]):
                     # weight_func = lambda x: torch.exp(-3 * x) - 0.5**3
                     # weight_func = lambda x: 2 - torch.exp(x)
                     # weighted_logits = \
