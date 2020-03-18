@@ -95,6 +95,13 @@ class BertEncoder(nn.Module):
         self.init_vlstm()
 
     def init_vlstm(self):
+        # hyperparameters for balancing loss
+        self.alpha = 0.2
+        self.beta = 0.6
+        self.gamma = 1.0
+        self.lamb = 0.0
+
+        # vlstm itself
         self.vlstm_size = 10
         self.vlstm = nn.LSTMCell(
             input_size=self.hidden_size,
@@ -103,7 +110,16 @@ class BertEncoder(nn.Module):
         self.vlstm_classifier = nn.Linear(self.vlstm_size + 2, 2)  # +2 is for adding logits
         self.vlstm_activation = nn.Tanh()
 
-    def enable_vlstm(self, Q=False):
+    def enable_vlstm(self, args, Q=False):
+        if args.alpha is not None:
+            self.alpha = args.alpha
+        if args.beta is not None:
+            self.beta = args.beta
+        if args.gamma is not None:
+            self.gamma = args.gamma
+        if args.lamb is not None:
+            self.lamb = args.lamb
+
         self.use_vlstm = True
         self.vlstm_activation = nn.Tanh() if Q else nn.Softmax(dim=1)
         print(f'vlstm initialized, Q={Q}')
@@ -469,11 +485,6 @@ class BertForSequenceClassification(BertPreTrainedModel):
         self.init_weights()
         self.training_threshold = 0.1
 
-        # hyperparameters for balancing loss
-        self.alpha = 0.15
-        self.beta = 0.7
-        self.gamma = 1.0
-        self.lamb = 0.0
 
     def update_threshold(self, func):
         self.training_threshold = func(self.training_threshold)
@@ -587,7 +598,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
                         labels
                     ).long()  # 0 for wrong/continue, 1 for right/exit
                     vlstm_loss += loss_fct(vlstm_pred, vlstm_gold)
-                    vlstm_loss += self.lamb * torch.mean(vlstm_pred[:, 0])
+                    vlstm_loss += self.bert.encoder.lamb * torch.mean(vlstm_pred[:, 0])
                 outputs = ([vlstm_loss],) + outputs
             elif train_strategy.endswith("-Qvlstm"):
                 vlstm_loss = 0
@@ -597,10 +608,10 @@ class BertForSequenceClassification(BertPreTrainedModel):
                         labels
                     ).long()  # 0 for wrong/continue, 1 for right/exit
                     Q_this = outputs[-1]['vlstm'][1][i]  # Q_i
-                    a_0_reward = torch.tensor([-self.alpha]).to(Q_this.device)  # reward for continue
+                    a_0_reward = torch.tensor([-self.bert.encoder.alpha]).to(Q_this.device)  # reward for continue
                     r_this = torch.stack([
                         a_0_reward.repeat(Q_this.shape[0]),
-                        - self.beta * (1 - vlstm_gold.float())
+                        - self.bert.encoder.beta * (1 - vlstm_gold.float())
                         # - self.beta * raw_highway_losses[i].detach()
                     ], dim=1)
                     if i == self.num_layers-2:
@@ -611,7 +622,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
                         Q_next = outputs[-1]['vlstm'][1][i+1]  # Q_{i+1}
                         Q_next = torch.max(Q_next, dim=1)[0].repeat(2, 1).t()  # this 2 is bad
                         vlstm_loss += torch.mean(
-                            (r_this + self.gamma*Q_next - Q_this) ** 2)
+                            (r_this + self.bert.encoder.gamma*Q_next - Q_this) ** 2)
                     # if step_num==130:
                     #     print(i)
                     #     print(Q_this)

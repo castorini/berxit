@@ -135,6 +135,14 @@ def get_args():
                         help="Linear warmup over warmup_steps.")
     parser.add_argument("--early_exit_entropy", default=-1, type=float,
                         help="Entropy threshold for early exit.")
+    parser.add_argument("--alpha", default=None, type=float,
+                        help="Hyperparameter for vlstm.")
+    parser.add_argument("--beta", default=None, type=float,
+                        help="Hyperparameter for vlstm.")
+    parser.add_argument("--gamma", default=None, type=float,
+                        help="Hyperparameter for vlstm.")
+    parser.add_argument("--lamb", default=None, type=float,
+                        help="Hyperparameter for vlstm.")
     parser.add_argument("--limit_layer", default="-1", type=str, required=False,
                         help="The layer for limit training.")
     parser.add_argument("--train_routine",
@@ -593,7 +601,38 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
             actual_cost = sum([l * c for l, c in exit_layer_counter.items()])
             full_cost = len(eval_dataloader) * model.num_layers
             print("Expected saving", actual_cost / full_cost)
-            if args.early_exit_entropy >= 0:
+
+            if (args.model_type == 'bert' and model.bert.encoder.use_vlstm) or \
+                    (args.model_type == 'roberta' and model.roberta.encoder.use_vlstm):
+                vlstm_save_fname = args.plot_data_dir + \
+                                   args.output_dir + \
+                                   "/vlstm.npy"
+                if not os.path.exists(vlstm_save_fname):
+                    prev_saver = []
+                else:
+                    prev_saver = np.load(vlstm_save_fname, allow_pickle=True).tolist()
+
+                print_result = get_wanted_result(result)
+                prev_saver.append([
+                    exit_layer_counter,
+                    eval_time,
+                    actual_cost / full_cost,
+                    print_result,
+                    {'alpha': model.bert.encoder.alpha,
+                     'beta':  model.bert.encoder.beta}
+                ])
+                np.save(vlstm_save_fname, np.array(prev_saver))
+                experiment.log_metrics({
+                    "eval_time": eval_time,
+                    "ERS": actual_cost / full_cost,
+                    "result": print_result
+                })
+                experiment.log_other(
+                    "exit_layer_counter",
+                    str(exit_layer_counter),
+                )
+
+            elif args.early_exit_entropy >= 0:
                 save_fname = args.plot_data_dir + \
                              args.model_name_or_path[2:] + \
                              "/entropy_{}.npy".format(args.early_exit_entropy)
@@ -784,7 +823,7 @@ def main(args):
             tokenizer = tokenizer_class.from_pretrained(non_vlstm_output_dir,
                                                         do_lower_case=args.do_lower_case)
             model = model_class.from_pretrained(non_vlstm_output_dir)
-            model.bert.encoder.enable_vlstm(Q=args.train_routine.endswith('-Qvlstm'))
+            model.bert.encoder.enable_vlstm(args, Q=args.train_routine.endswith('-Qvlstm'))
             model.to(args.device)
 
     else:
@@ -803,7 +842,7 @@ def main(args):
             tokenizer = tokenizer_class.from_pretrained(non_vlstm_output_dir,
                                                         do_lower_case=args.do_lower_case)
             model = model_class.from_pretrained(non_vlstm_output_dir)
-            model.bert.encoder.enable_vlstm(Q=args.train_routine.endswith('-Qvlstm'))
+            model.bert.encoder.enable_vlstm(args, Q=args.train_routine.endswith('-Qvlstm'))
             model.to(args.device)
 
 
@@ -948,24 +987,48 @@ def main(args):
             model.to(args.device)
             if args.train_routine.endswith('-vlstm'):
                 if args.model_type=='bert':
-                    model.bert.encoder.enable_vlstm()
+                    model.bert.encoder.enable_vlstm(args)
+                    experiment.log_other(
+                        'note',
+                        'al={} be={} ga={}'.format(
+                            model.bert.encoder.alpha,
+                            model.bert.encoder.beta,
+                            model.bert.encoder.gamma
+                        )
+                    )
                 else:
-                    model.roberta.encoder.enable_vlstm()
-                experiment.log_other(
-                    'note',
-                    f'la={model.lamb}'
-                )
-                args.eval_highway, args.early_exit_entropy = True, 1.0 # triggers ERS measurement
+                    model.roberta.encoder.enable_vlstm(args)
+                    experiment.log_other(
+                        'note',
+                        'al={} be={} ga={}'.format(
+                            model.roberta.encoder.alpha,
+                            model.roberta.encoder.beta,
+                            model.roberta.encoder.gamma
+                        )
+                    )
+                args.eval_highway = True  # triggers ERS measurement
             elif args.train_routine.endswith('-Qvlstm'):
                 if args.model_type=='bert':
-                    model.bert.encoder.enable_vlstm(Q=True)
+                    model.bert.encoder.enable_vlstm(args, Q=True)
+                    experiment.log_other(
+                        'note',
+                        'al={} be={} ga={}'.format(
+                            model.bert.encoder.alpha,
+                            model.bert.encoder.beta,
+                            model.bert.encoder.gamma
+                        )
+                    )
                 else:
-                    model.roberta.encoder.enable_vlstm(Q=True)
-                experiment.log_other(
-                    'note',
-                    f'al={model.alpha} be={model.beta} ga={model.gamma}'
-                )
-                args.eval_highway, args.early_exit_entropy = True, 1.0 # triggers ERS measurement
+                    model.roberta.encoder.enable_vlstm(args, Q=True)
+                    experiment.log_other(
+                        'note',
+                        'al={} be={} ga={}'.format(
+                            model.roberta.encoder.alpha,
+                            model.roberta.encoder.beta,
+                            model.roberta.encoder.gamma
+                        )
+                    )
+                args.eval_highway = True  # triggers ERS measurement
 
             result = evaluate(args, model, tokenizer, prefix=prefix,
                               eval_highway=args.eval_highway,

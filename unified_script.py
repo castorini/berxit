@@ -16,8 +16,15 @@ for x in os.listdir(log_folder):
 filecount = len(existed_experiments)
 
 
+args = sys.argv[1:]
+if len(args)==7:
+    flavor, model, dataset, seed, routine, entropy, inter = args
+    HP = None
+elif len(args)==8:
+    flavor, model, dataset, seed, routine, entropy, inter, HP = args
+else:
+    raise ValueError("Wrong number of parameters")
 
-flavor, model, dataset, seed, routine, entropy, inter = sys.argv[1:]
 # flavor: raw, train_highway, eval_highway
 # model: bert-base, bert-large, roberta-base, roberta-large
 # dataset: MRPC, SST-2, RTE, QNLI
@@ -224,6 +231,10 @@ elif flavor == "train_highway":
         routine,
         filecount
     )
+    if HP is not None:
+        groups = map(lambda x: x.split(','), HP.split(';'))
+        for g in groups:
+            script += ' --' + g[0] + ' ' + g[1]
 elif flavor == "raw":
     script = script_template[flavor].format(
         model[:model.index('-')],
