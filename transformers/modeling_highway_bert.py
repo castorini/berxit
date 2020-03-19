@@ -97,8 +97,8 @@ class BertEncoder(nn.Module):
 
     def init_vlstm(self):
         # hyperparameters for balancing loss
-        self.alpha = 0.2
-        self.beta = 0.6
+        self.alpha = 0.12
+        self.beta = 0.5
         self.gamma = 1.0
         self.lamb = 0.0
 
@@ -616,15 +616,22 @@ class BertForSequenceClassification(BertPreTrainedModel):
             elif train_strategy.endswith("-Qvlstm"):
                 vlstm_loss = 0
                 for i in range(self.num_layers-1):
-                    vlstm_gold = torch.eq(
-                        torch.argmax(outputs[-1]['highway'][i][0], dim=1),
-                        labels
-                    ).long()  # 0 for wrong/continue, 1 for right/exit
+                    if self.num_labels==1:
+                        correctness_loss = torch.pow(
+                            outputs[-1]['highway'][i][0].squeeze() - labels,
+                            2
+                        )
+                    else:
+                        vlstm_gold = torch.eq(
+                            torch.argmax(outputs[-1]['highway'][i][0], dim=1),
+                            labels
+                        ).long()  # 0 for wrong/continue, 1 for right/exit
+                        correctness_loss = 1 - vlstm_gold.float()
                     Q_this = outputs[-1]['vlstm'][1][i]  # Q_i
                     a_0_reward = torch.tensor([-self.bert.encoder.alpha]).to(Q_this.device)  # reward for continue
                     r_this = torch.stack([
                         a_0_reward.repeat(Q_this.shape[0]),
-                        - self.bert.encoder.beta * (1 - vlstm_gold.float())
+                        - self.bert.encoder.beta * correctness_loss
                         # - self.beta * raw_highway_losses[i].detach()
                     ], dim=1)
                     if i == self.num_layers-2:
@@ -636,10 +643,12 @@ class BertForSequenceClassification(BertPreTrainedModel):
                         Q_next = torch.max(Q_next, dim=1)[0].repeat(2, 1).t()  # this 2 is bad
                         vlstm_loss += torch.mean(
                             (r_this + self.bert.encoder.gamma*Q_next - Q_this) ** 2)
-                    # if step_num==130:
-                    #     print(i)
-                    #     print(Q_this)
-                    #     print(r_this)
+                #     if step_num==130:
+                #         print(i)
+                #         print(Q_this)
+                #         print(r_this)
+                # if step_num==130:
+                #     breakpoint()
                 outputs = ([vlstm_loss],) + outputs
             elif train_strategy == 'raw':
                 outputs = ([loss],) + outputs
