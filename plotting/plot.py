@@ -13,15 +13,18 @@ color = {
     "all": 1,
     "all_alternate": 2,
     "weight-tok": 3,
-    "alternate-1": 4
+    "alternate-1": 4,
+    "all_alternate-Qvlstm": 4
 }
 formal_name = {
     "shrink-1": "weight-tok",
     "all": "joint",
     "all_alternate": "alternating",
-    "two_stage": "two_stage"
+    "two_stage": "two_stage",
+    "all_alternate-Qvlstm": "alternating-Q"
 }
-routines = ["two_stage", "all", "all_alternate"]
+# routines = ["all_alternate-Qvlstm"]
+routines = ["two_stage", "all", "all_alternate", "all_alternate-Qvlstm"]
 
 def np_load(fname):
     return np.load(fname, allow_pickle=True)
@@ -66,11 +69,12 @@ def get_speedup(lst):
 def plot_acc_time_tradeoff(axis, data, labels, flags):
     time, acc = data
     for i, routine in enumerate(routines):
-        saving = get_speedup(time[routine][0])
+        if routine.endswith("-Qvlstm"):
+            saving = list(map(lambda x: 1/x, time[routine][0]))
+        else:
+            saving = get_speedup(time[routine][0])
         plot_data = list(zip(saving, acc[routine][0]))
         plot_data.sort()
-        print(plot_data)
-        # breakpoint()
         axis.plot(*list(zip(*plot_data)), '-', color=colors[color[routine]],
                   label=formal_name[routine], linewidth=2.5, markersize=15)
     axis.legend()
@@ -172,6 +176,22 @@ for model in models:
     routine_files = get_files(model, dataset)
 
     for x in routines:
+        if x.endswith('-Qvlstm'):
+            # breakpoint()
+            model_data = np_load(
+                f"saved_models/{model}/{dataset}/{x}-42/vlstm.npy"
+            )
+            model_time_data =[]
+            model_acc_data = []
+            for entry in model_data:
+                # if entry[2]<0.2:
+                #     print(entry[2])
+                #     continue
+                model_time_data.append(entry[2])
+                model_acc_data.append(entry[3]*100)
+            time_data[x].append(model_time_data)
+            acc_data[x].append(model_acc_data)
+            continue
         each_layer_acc_data[x].append(np_load(routine_files[x][0]))
 
         model_entropy_data = []
@@ -196,9 +216,10 @@ for model in models:
 
 
 for x in routines:
+    if x.endswith('-Qvlstm'):
+        continue
     print(x)
     show_results([entropy_data[x], time_data[x], acc_data[x], err_data[x]])
-
 
 
 sns.set(style='whitegrid', font_scale=2.5)
@@ -217,6 +238,8 @@ plt.cla()
 
 sns.set(style='white', font_scale=1.25)
 for i, routine in enumerate(routines):
+    if x.endswith('-Qvlstm'):
+        continue
     fig, axes = plt.subplots(2, 1, figsize=[6.4, 6.4*0.8])
     plot_exit_samples_by_layer(axes[0],
                                [entropy_data[routine], samples_layer_data[routine]],
