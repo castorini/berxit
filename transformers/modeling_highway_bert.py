@@ -626,7 +626,8 @@ class BertForSequenceClassification(BertPreTrainedModel):
                             torch.argmax(outputs[-1]['highway'][i][0], dim=1),
                             labels
                         ).long()  # 0 for wrong/continue, 1 for right/exit
-                        correctness_loss = 1 - vlstm_gold.float()
+                        correctness_loss = 0.99 - vlstm_gold.float()*0.98
+                        # soft labels: 1->0.01, 0->0.99
                     Q_this = outputs[-1]['vlstm'][1][i]  # Q_i
                     a_0_reward = torch.tensor([-self.bert.encoder.alpha]).to(Q_this.device)  # reward for continue
                     r_this = torch.stack([
@@ -643,11 +644,12 @@ class BertForSequenceClassification(BertPreTrainedModel):
                         Q_next = torch.max(Q_next, dim=1)[0].repeat(2, 1).t()  # this 2 is bad
                         vlstm_loss += torch.mean(
                             (r_this + self.bert.encoder.gamma*Q_next - Q_this) ** 2)
-                #     if step_num==130:
+                #     breakpoint_flag = (step_num>=100) and (step_num<=105) and (torch.sum(correctness_loss)>0.5)
+                #     if breakpoint_flag:
                 #         print(i)
                 #         print(Q_this)
                 #         print(r_this)
-                # if step_num==130:
+                # if breakpoint_flag:
                 #     breakpoint()
                 outputs = ([vlstm_loss],) + outputs
             elif train_strategy == 'raw':
