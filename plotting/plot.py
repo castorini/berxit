@@ -177,12 +177,11 @@ for model in models:
 
     for x in routines:
         if x.endswith('-Qvlstm'):
-            # breakpoint()
             model_data = np_load(
                 f"saved_models/{model}/{dataset}/{x}-42/vlstm.npy"
             )
-            model_time_data =[]
-            model_acc_data = []
+            model_time_data =[1.0]
+            model_acc_data = [acc_data['all_alternate'][0][0]]
             for entry in model_data:
                 # if entry[2]<0.2:
                 #     print(entry[2])
@@ -213,7 +212,6 @@ for model in models:
         acc_data[x].append(model_acc_data)
         err_data[x].append(model_err_data)
         samples_layer_data[x].append(model_samples_layer_data)
-
 
 for x in routines:
     if x.endswith('-Qvlstm'):

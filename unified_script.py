@@ -51,8 +51,9 @@ entropy_selection = {
         "MNLI":   "0,0.01,0.05,0.1,0.2,0.3,0.4"
     },
     "bert-large": {
-        "MRPC":  "0,0.1,0.2,0.3,0.35,0.4,0.45,0.5",
-        "SST-2": "0,0.001,0.005,0.01,0.05,0.2,0.3,0.4,0.5,0.55,0.6",
+        # "MRPC":  "0",
+        "MRPC":  "0,0.1,0.2,0.3,0.35,0.4,0.45,0.5,0.55,0.6,0.65,0.68",
+        "SST-2": "0,0.001,0.005,0.01,0.05,0.2,0.3,0.4,0.5,0.55,0.6,0.65,0.68",
         "QNLI":  "0.14,0.15,0.2,0.3,0.35",
         # "QNLI":  "0,0.06,0.1,0.14,0.15,0.2,0.3,0.35",
         "MNLI":   "0,0.001,0.01,0.05,0.1,0.15,0.2,0.3,0.4,0.5"
@@ -250,9 +251,6 @@ elif flavor == "raw":
         filecount
     )
 elif flavor == "entropy":
-    if inter != "True":
-        print("Entropy must be interactive")
-        exit(1)
     entropies = entropy_selection[model][dataset].split(',')
     print(entropies)
     for curr_entropy in entropies:
@@ -272,7 +270,10 @@ elif flavor == "entropy":
             filecount
         )
         script = script + "\\\n    --no_comet"
-        inter_run(script)
+        if inter == 'True':
+            inter_run(script)
+        else:
+            submit_run(script, filecount)
         print("\n")
     exit(0)
 elif flavor == 'limit':

@@ -195,7 +195,7 @@ logging.basicConfig(filename="logs/{}.log".format(args.log_id),
                     filemode='w',
                     level=0)
 logger = logging.getLogger(__name__)
-logger.info("SLURM_JOB_ID: {}".format(os.environ["SLURM_JOB_ID"]))
+logger.info("SLURM_JOB_ID: {}".format(os.environ["SLURM_JOB_ID"] if "SLURM_JOB_ID" in os.environ else -1))
 logger.info("SLURM_INFO: {}".format([x for x in os.environ.items() if "SLURM" in x[0]]))
 
 experiment = cm.Experiment(project_name='useless-debug' if args.no_comet else 'highway',
@@ -206,7 +206,7 @@ experiment = cm.Experiment(project_name='useless-debug' if args.no_comet else 'h
 experiment.set_name(args.log_id + '--' + str(datetime.date.today()))
 experiment.log_parameters({
     "log_id": args.log_id,
-    "slurm_id": os.environ["SLURM_JOB_ID"]
+    "slurm_id": os.environ["SLURM_JOB_ID"] if "SLURM_JOB_ID" in os.environ else -1
 })
 
 
