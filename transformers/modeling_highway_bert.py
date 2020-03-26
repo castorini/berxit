@@ -108,7 +108,8 @@ class BertEncoder(nn.Module):
             input_size=self.hidden_size,
             hidden_size=self.vlstm_size
         )
-        self.vlstm_classifier = nn.Linear(self.vlstm_size + 2, 2)  # +2 is for adding logits
+        self.vlstm_classifier = nn.Linear(self.vlstm_size + 3, 2)
+        # +3: 2 for logits, 1 for entropy (0 padding for regression tasks)
         self.vlstm_activation = nn.Tanh()
 
     def enable_vlstm(self, args, Q=False):
@@ -191,14 +192,14 @@ class BertEncoder(nn.Module):
                     vlstm_classifier_input = torch.cat([
                         vlstm_hc_tuple[0],
                         highway_exit[0],
-                        torch.tensor([[0.0] for _ in range(highway_exit[0].shape[0])]).to(highway_exit[0].device)
+                        torch.tensor([[0.0, 0.0] for _ in range(highway_exit[0].shape[0])]).to(highway_exit[0].device)
                     ], dim=1)
                 else:
                     vlstm_classifier_input = torch.cat([
                         vlstm_hc_tuple[0],
-                        highway_exit[0]
+                        highway_exit[0],
+                        entropy(highway_exit[0]).unsqueeze(1)
                     ], dim=1)
-                # breakpoint()
                 vlstm_classifier_output = self.vlstm_activation(
                     self.vlstm_classifier(vlstm_classifier_input)
                 )
