@@ -173,68 +173,71 @@ class BertEncoder(nn.Module):
                 current_outputs = current_outputs + (all_attentions,)
 
             # the block for highway
-            if self.divide == 'divide':
-                highway_exit = self.highway[i](
-                    (current_outputs[0]*self.mask,) + current_outputs[1:]
-                )
-            elif self.divide == 'full_divide':
-                highway_exit = self.highway[i](
-                    (current_outputs[0]*self.rightward_mask,) + current_outputs[1:]
-                )
-            else:
-                highway_exit = self.highway[i](current_outputs)
-                # logits, pooled_output
+            with torch.autograd.profiler.record_function('highway'):
+                if self.divide == 'divide':
+                    highway_exit = self.highway[i](
+                        (current_outputs[0]*self.mask,) + current_outputs[1:]
+                    )
+                elif self.divide == 'full_divide':
+                    highway_exit = self.highway[i](
+                        (current_outputs[0]*self.rightward_mask,) + current_outputs[1:]
+                    )
+                else:
+                    highway_exit = self.highway[i](current_outputs)
+                    # logits, pooled_output
 
             # the block for vlstm
-            if self.use_vlstm:
-                vlstm_input = highway_exit[1]
-                vlstm_hc_tuple = self.vlstm(vlstm_input, vlstm_hc_tuple)
-                vlstm_outputs.append(vlstm_hc_tuple[0])
-                if self.num_labels==3:
-                    vlstm_classifier_input = torch.cat([
-                        vlstm_hc_tuple[0],
-                        highway_exit[0],
-                        entropy(highway_exit[0]).unsqueeze(1)
-                    ], dim=1)
-                elif self.num_labels==2:
-                    # add extra zero-vector for shape consistence
-                    vlstm_classifier_input = torch.cat([
-                        vlstm_hc_tuple[0],
-                        highway_exit[0],
-                        entropy(highway_exit[0]).unsqueeze(1),
-                        torch.tensor(
-                            [[0.0] for _ in range(highway_exit[0].shape[0])]).to(highway_exit[0].device)
-                    ], dim=1)
-                elif self.num_labels==1:
-                    # add extra zero-vector for shape consistence
-                    vlstm_classifier_input = torch.cat([
-                        vlstm_hc_tuple[0],
-                        highway_exit[0],
-                        torch.tensor(
-                            [[0.0, 0.0, 0.0] for _ in range(highway_exit[0].shape[0])]).to(highway_exit[0].device)
-                    ], dim=1)
-                vlstm_classifier_output = self.vlstm_activation(
-                    self.vlstm_classifier(vlstm_classifier_input)
-                )
-                vlstm_classifier_outputs.append(vlstm_classifier_output)
+            with torch.autograd.profiler.record_function('vlstm'):
+                if self.use_vlstm:
+                    vlstm_input = highway_exit[1]
+                    vlstm_hc_tuple = self.vlstm(vlstm_input, vlstm_hc_tuple)
+                    vlstm_outputs.append(vlstm_hc_tuple[0])
+                    if self.num_labels==3:
+                        vlstm_classifier_input = torch.cat([
+                            vlstm_hc_tuple[0],
+                            highway_exit[0],
+                            entropy(highway_exit[0]).unsqueeze(1)
+                        ], dim=1)
+                    elif self.num_labels==2:
+                        # add extra zero-vector for shape consistence
+                        vlstm_classifier_input = torch.cat([
+                            vlstm_hc_tuple[0],
+                            highway_exit[0],
+                            entropy(highway_exit[0]).unsqueeze(1),
+                            torch.tensor(
+                                [[0.0] for _ in range(highway_exit[0].shape[0])]).to(highway_exit[0].device)
+                        ], dim=1)
+                    elif self.num_labels==1:
+                        # add extra zero-vector for shape consistence
+                        vlstm_classifier_input = torch.cat([
+                            vlstm_hc_tuple[0],
+                            highway_exit[0],
+                            torch.tensor(
+                                [[0.0, 0.0, 0.0] for _ in range(highway_exit[0].shape[0])]).to(highway_exit[0].device)
+                        ], dim=1)
+                    vlstm_classifier_output = self.vlstm_activation(
+                        self.vlstm_classifier(vlstm_classifier_input)
+                    )
+                    vlstm_classifier_outputs.append(vlstm_classifier_output)
 
             if not self.training:
-                highway_logits = highway_exit[0]
-                highway_entropy = entropy(highway_logits)
-                highway_exit = highway_exit + (highway_entropy,)  # logits, hidden_states(?), entropy
-                all_highway_exits = all_highway_exits + (highway_exit,)
+                with torch.autograd.profiler.record_function('highway'):
+                    highway_logits = highway_exit[0]
+                    highway_entropy = entropy(highway_logits)
+                    highway_exit = highway_exit + (highway_entropy,)  # logits, hidden_states(?), entropy
+                    all_highway_exits = all_highway_exits + (highway_exit,)
 
-                if (self.use_vlstm and torch.argmax(vlstm_classifier_output)==1) or \
-                   ((not self.use_vlstm) and highway_entropy < self.early_exit_entropy[i]):
-                    # weight_func = lambda x: torch.exp(-3 * x) - 0.5**3
-                    # weight_func = lambda x: 2 - torch.exp(x)
-                    # weighted_logits = \
-                    #     sum([weight_func(x[2]) * x[0] for x in all_highway_exits]) /\
-                    #     sum([weight_func(x[2]) for x in all_highway_exits])
-                    # new_output = (weighted_logits,) + current_outputs[1:] + (all_highway_exits,)
-                    new_output = (highway_logits,) + current_outputs[1:] + \
-                                 ({'highway': all_highway_exits},)
-                    raise HighwayException(new_output, i+1)
+                    if (self.use_vlstm and torch.argmax(vlstm_classifier_output)==1) or \
+                       ((not self.use_vlstm) and highway_entropy < self.early_exit_entropy[i]):
+                        # weight_func = lambda x: torch.exp(-3 * x) - 0.5**3
+                        # weight_func = lambda x: 2 - torch.exp(x)
+                        # weighted_logits = \
+                        #     sum([weight_func(x[2]) * x[0] for x in all_highway_exits]) /\
+                        #     sum([weight_func(x[2]) for x in all_highway_exits])
+                        # new_output = (weighted_logits,) + current_outputs[1:] + (all_highway_exits,)
+                        new_output = (highway_logits,) + current_outputs[1:] + \
+                                     ({'highway': all_highway_exits},)
+                        # raise HighwayException(new_output, i+1)
             else:
                 all_highway_exits = all_highway_exits + (highway_exit,)
 

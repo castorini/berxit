@@ -540,41 +540,41 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
         entropy_collection = []
         maxlogit_collection = []
         st = time.time()
-        for batch in tqdm(eval_dataloader, desc="Evaluating"):
-            model.eval()
-            batch = tuple(t.to(args.device) for t in batch)
+        with torch.autograd.profiler.profile(use_cuda=True) as prof:
+            for batch in tqdm(eval_dataloader, desc="Evaluating"):
+                model.eval()
+                batch = tuple(t.to(args.device) for t in batch)
 
-            with torch.no_grad():
-                inputs = {'input_ids': batch[0],
-                          'attention_mask': batch[1],
-                          'labels': batch[3]}
-                if args.model_type != 'distilbert':
-                    inputs['token_type_ids'] = batch[2] if args.model_type in ['bert',
-                                                                               'xlnet'] else None  # XLM, DistilBERT and RoBERTa don't use segment_ids
-                if output_layer >= 0:
-                    inputs['output_layer'] = output_layer
-                outputs = model(**inputs)
-                entropy_collection.append(
-                    [x.cpu().item() for x in outputs[3][1][:-1]] + [outputs[3][0].cpu().item()]
-                )
-                maxlogit_collection.append(
-                    [torch.max(torch.softmax(x[0], dim=1)).cpu().item() for x in outputs[2]['highway'][:-1]] +\
-                    [torch.max(torch.softmax(outputs[1], dim=1)).cpu().item()]
-                )
-                if eval_highway:
-                    exit_layer_counter[outputs[-1]] += 1
-                tmp_eval_loss, logits = outputs[:2]
-                tmp_eval_loss = tmp_eval_loss[-1]
+                with torch.no_grad():
+                    inputs = {'input_ids': batch[0],
+                              'attention_mask': batch[1],
+                              'labels': batch[3]}
+                    if args.model_type != 'distilbert':
+                        inputs['token_type_ids'] = batch[2] if args.model_type in ['bert',
+                                                                                   'xlnet'] else None  # XLM, DistilBERT and RoBERTa don't use segment_ids
+                    if output_layer >= 0:
+                        inputs['output_layer'] = output_layer
+                    outputs = model(**inputs)
+                    entropy_collection.append(
+                        [x.cpu().item() for x in outputs[3][1][:-1]] + [outputs[3][0].cpu().item()]
+                    )
+                    maxlogit_collection.append(
+                        [torch.max(torch.softmax(x[0], dim=1)).cpu().item() for x in outputs[2]['highway'][:-1]] +\
+                        [torch.max(torch.softmax(outputs[1], dim=1)).cpu().item()]
+                    )
+                    if eval_highway:
+                        exit_layer_counter[outputs[-1]] += 1
+                    tmp_eval_loss, logits = outputs[:2]
+                    tmp_eval_loss = tmp_eval_loss[-1]
 
-                eval_loss += tmp_eval_loss.mean().item()
-            nb_eval_steps += 1
-            if preds is None:
-                preds = logits.detach().cpu().numpy()
-                out_label_ids = inputs['labels'].detach().cpu().numpy()
-            else:
-                preds = np.append(preds, logits.detach().cpu().numpy(), axis=0)
-                out_label_ids = np.append(out_label_ids, inputs['labels'].detach().cpu().numpy(), axis=0)
-
+                    eval_loss += tmp_eval_loss.mean().item()
+                nb_eval_steps += 1
+                if preds is None:
+                    preds = logits.detach().cpu().numpy()
+                    out_label_ids = inputs['labels'].detach().cpu().numpy()
+                else:
+                    preds = np.append(preds, logits.detach().cpu().numpy(), axis=0)
+                    out_label_ids = np.append(out_label_ids, inputs['labels'].detach().cpu().numpy(), axis=0)
 
         eval_time = time.time() - st
         print("Eval time:", eval_time)
@@ -626,6 +626,8 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
                      'beta':  model.bert.encoder.beta}
                 ])
                 np.save(vlstm_save_fname, np.array(prev_saver))
+                with open(args.plot_data_dir + args.output_dir + "/profile.txt", 'w') as fout:
+                    print(prof.key_averages().table(sort_by="cuda_time_total"), file=fout)
                 experiment.log_metrics({
                     "eval_time": eval_time,
                     "ERS": actual_cost / full_cost,
