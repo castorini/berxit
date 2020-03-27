@@ -92,7 +92,6 @@ class BertEncoder(nn.Module):
         self.early_exit_entropy = [-1 for _ in range(config.num_hidden_layers)]
 
         self.use_vlstm = False
-        self.regression_task = False # only True for using Qvlstm for evaluation
         self.init_vlstm()
 
     def init_vlstm(self):
@@ -108,8 +107,8 @@ class BertEncoder(nn.Module):
             input_size=self.hidden_size,
             hidden_size=self.vlstm_size
         )
-        self.vlstm_classifier = nn.Linear(self.vlstm_size + 3, 2)
-        # +3: 2 for logits, 1 for entropy (0 padding for regression tasks)
+        self.vlstm_classifier = nn.Linear(self.vlstm_size + 4, 2)
+        # +4: 3 for logits, 1 for entropy (0 padding for regression tasks)
         self.vlstm_activation = nn.Tanh()
 
     def enable_vlstm(self, args, Q=False):
@@ -121,8 +120,12 @@ class BertEncoder(nn.Module):
             self.gamma = args.gamma
         if args.lamb is not None:
             self.lamb = args.lamb
+
+        self.num_labels = 2
         if args.task_name in ['sts-b']:
-            self.regression_task = True
+            self.num_labels = 1
+        elif args.task_name in ['mnli']:
+            self.num_labels = 3
 
         self.use_vlstm = True
         self.vlstm_activation = nn.Tanh() if Q else nn.Softmax(dim=1)
@@ -187,18 +190,28 @@ class BertEncoder(nn.Module):
                 vlstm_input = highway_exit[1]
                 vlstm_hc_tuple = self.vlstm(vlstm_input, vlstm_hc_tuple)
                 vlstm_outputs.append(vlstm_hc_tuple[0])
-                if self.regression_task:
-                    # an extra zero-vector for shape consistence
-                    vlstm_classifier_input = torch.cat([
-                        vlstm_hc_tuple[0],
-                        highway_exit[0],
-                        torch.tensor([[0.0, 0.0] for _ in range(highway_exit[0].shape[0])]).to(highway_exit[0].device)
-                    ], dim=1)
-                else:
+                if self.num_labels==3:
                     vlstm_classifier_input = torch.cat([
                         vlstm_hc_tuple[0],
                         highway_exit[0],
                         entropy(highway_exit[0]).unsqueeze(1)
+                    ], dim=1)
+                elif self.num_labels==2:
+                    # add extra zero-vector for shape consistence
+                    vlstm_classifier_input = torch.cat([
+                        vlstm_hc_tuple[0],
+                        highway_exit[0],
+                        entropy(highway_exit[0]).unsqueeze(1),
+                        torch.tensor(
+                            [[0.0] for _ in range(highway_exit[0].shape[0])]).to(highway_exit[0].device)
+                    ], dim=1)
+                elif self.num_labels==1:
+                    # add extra zero-vector for shape consistence
+                    vlstm_classifier_input = torch.cat([
+                        vlstm_hc_tuple[0],
+                        highway_exit[0],
+                        torch.tensor(
+                            [[0.0, 0.0, 0.0] for _ in range(highway_exit[0].shape[0])]).to(highway_exit[0].device)
                     ], dim=1)
                 vlstm_classifier_output = self.vlstm_activation(
                     self.vlstm_classifier(vlstm_classifier_input)
