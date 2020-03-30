@@ -35,8 +35,8 @@ else:
 entropy_selection = {
     # there might be additional ones for specific routines
     "bert-base": {
-        "MRPC":  "0,0.05,0.1,0.15,0.2,0.3,0.4,0.5,0.55,0.57", # 0.6,0.61 for two_stage; 0.58 for alternating
-        "SST-2": "0,0.001,0.005,0.01,0.05,0.2,0.3,0.4", # 0.5,0.55,0.6,0.65 for two_stage
+        "MRPC":  "0,0.05,0.1,0.15,0.2,0.3,0.4,0.5,0.55,0.57,0.6,0.65,0.68", # 0.6,0.61 for two_stage; 0.58 for alternating
+        "SST-2": "0,0.001,0.005,0.01,0.05,0.2,0.3,0.4,0.5,0.55,0.6,0.65,0.68,0.7", # 0.5,0.55,0.6,0.65 for two_stage
         "QNLI":  "0,0.06,0.1,0.14,0.15,0.2,0.3,0.35", # 0.5,0.55,0.6,0.65 for two_stage
         "RTE":   "0,0.2,0.25,0.3,0.35,0.4,0.6,0.65", # 0.68 for two_stage
         "QQP":   "0,0.01,0.05,0.1,0.2,0.3,0.4,0.5,0.6", # 0.65 for two_stage
