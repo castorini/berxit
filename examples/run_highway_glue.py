@@ -539,8 +539,9 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
         exit_layer_counter = {(i + 1): 0 for i in range(model.num_layers)}
         entropy_collection = []
         maxlogit_collection = []
+        profiling = False
         st = time.time()
-        with torch.autograd.profiler.profile(use_cuda=True) as prof:
+        with torch.autograd.profiler.profile(enabled=profiling, use_cuda=True) as prof:
             for batch in tqdm(eval_dataloader, desc="Evaluating"):
                 model.eval()
                 batch = tuple(t.to(args.device) for t in batch)
@@ -626,8 +627,9 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
                      'beta':  model.bert.encoder.beta}
                 ])
                 np.save(vlstm_save_fname, np.array(prev_saver))
-                with open(args.plot_data_dir + args.output_dir + "/profile.txt", 'w') as fout:
-                    print(prof.key_averages().table(sort_by="cuda_time_total"), file=fout)
+                if profiling:
+                    with open(args.plot_data_dir + args.output_dir + "/profile.txt", 'w') as fout:
+                        print(prof.key_averages().table(sort_by="cuda_time_total"), file=fout)
                 experiment.log_metrics({
                     "eval_time": eval_time,
                     "ERS": actual_cost / full_cost,
