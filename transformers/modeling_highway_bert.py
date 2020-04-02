@@ -1,8 +1,8 @@
+import numpy as np
 import torch
 from torch import nn
 from torch.nn import CrossEntropyLoss, MSELoss
 import torch.nn.functional as F
-
 from .modeling_bert import BertLayer, BertLayerNorm, BertPreTrainedModel
 
 
@@ -156,12 +156,15 @@ class BertEncoder(nn.Module):
         vlstm_outputs = []
         vlstm_classifier_outputs = []
 
+        batch_size = hidden_states.shape[0]
+        device = hidden_states.device
+
         if self.num_labels == 2:
             zeros = torch.tensor(
-                [[0.0] for _ in range(hidden_states.shape[0])]).to(hidden_states.device)
+                [[0.0] for _ in range(batch_size)]).to(device)
         elif self.num_labels == 1:
             zeros = torch.tensor(
-                [[0.0, 0.0, 0.0] for _ in range(hidden_states.shape[0])]).to(hidden_states.device)
+                [[0.0, 0.0, 0.0] for _ in range(batch_size)]).to(device)
 
         for i, layer_module in enumerate(self.layer):
             if self.output_hidden_states:
@@ -235,6 +238,7 @@ class BertEncoder(nn.Module):
                     highway_exit = highway_exit + (highway_entropy,)  # logits, hidden_states(?), entropy
                     all_highway_exits = all_highway_exits + (highway_exit,)
 
+                    # if np.random.rand() < 0.1:
                     if (self.use_vlstm and torch.argmax(vlstm_classifier_output)==1) or \
                        ((not self.use_vlstm) and highway_entropy < self.early_exit_entropy[i]):
                         # weight_func = lambda x: torch.exp(-3 * x) - 0.5**3
@@ -552,6 +556,9 @@ class BertForSequenceClassification(BertPreTrainedModel):
             exit_layer = e.exit_layer
             logits = outputs[0]
 
+        batch_size = logits.shape[0]
+        device = logits.device
+
         if not self.training:
             original_entropy = entropy(logits)
             highway_entropy = []
@@ -640,6 +647,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 outputs = ([vlstm_loss],) + outputs
             elif train_strategy.endswith("-Qvlstm"):
                 vlstm_loss = 0
+                ongoing = torch.ones([batch_size, 1]).to(device)
                 for i in range(self.num_layers-1):
                     if self.num_labels==1:
                         correctness_loss = torch.pow(
@@ -654,12 +662,14 @@ class BertForSequenceClassification(BertPreTrainedModel):
                         correctness_loss = 0.99 - vlstm_gold.float()*0.98
                         # soft labels: 1->0.01, 0->0.99
                     Q_this = outputs[-1]['vlstm'][1][i]  # Q_i
-                    a_0_reward = torch.tensor([-self.bert.encoder.alpha]).to(Q_this.device)  # reward for continue
+                    a_0_reward = torch.tensor([-self.bert.encoder.alpha]).to(device)  # reward for continue
                     r_this = torch.stack([
-                        a_0_reward.repeat(Q_this.shape[0]),
+                        a_0_reward.repeat(batch_size),
                         - self.bert.encoder.beta * correctness_loss
                         # - self.beta * raw_highway_losses[i].detach()
                     ], dim=1)
+                    r_this = r_this * ongoing # only ongoing samples have reward
+                    ongoing = ongoing * torch.eq(torch.argmax(Q_this, dim=1), 0).unsqueeze(1)
                     if i == self.num_layers-2:
                         vlstm_loss += torch.mean(
                             (r_this - Q_this) ** 2
