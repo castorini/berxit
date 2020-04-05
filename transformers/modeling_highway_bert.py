@@ -159,12 +159,13 @@ class BertEncoder(nn.Module):
         batch_size = hidden_states.shape[0]
         device = hidden_states.device
 
-        if self.num_labels == 2:
-            zeros = torch.tensor(
-                [[0.0] for _ in range(batch_size)]).to(device)
-        elif self.num_labels == 1:
-            zeros = torch.tensor(
-                [[0.0, 0.0, 0.0] for _ in range(batch_size)]).to(device)
+        if self.use_vlstm:
+            if self.num_labels == 2:
+                zeros = torch.tensor(
+                    [[0.0] for _ in range(batch_size)]).to(device)
+            elif self.num_labels == 1:
+                zeros = torch.tensor(
+                    [[0.0, 0.0, 0.0] for _ in range(batch_size)]).to(device)
 
         for i, layer_module in enumerate(self.layer):
             if self.output_hidden_states:
@@ -238,9 +239,11 @@ class BertEncoder(nn.Module):
                     highway_exit = highway_exit + (highway_entropy,)  # logits, hidden_states(?), entropy
                     all_highway_exits = all_highway_exits + (highway_exit,)
 
-                    # if np.random.rand() < 0.1:
-                    if (self.use_vlstm and torch.argmax(vlstm_classifier_output)==1) or \
-                       ((not self.use_vlstm) and highway_entropy < self.early_exit_entropy[i]):
+                    # if np.random.rand() < 0.1:  # compare against random exit
+                    if (i+1 < self.num_layers) and (
+                            (self.use_vlstm and torch.argmax(vlstm_classifier_output)==1) or \
+                            (not self.use_vlstm and highway_entropy < self.early_exit_entropy[i]) \
+                        ):
                         # weight_func = lambda x: torch.exp(-3 * x) - 0.5**3
                         # weight_func = lambda x: 2 - torch.exp(x)
                         # weighted_logits = \
@@ -679,11 +682,11 @@ class BertForSequenceClassification(BertPreTrainedModel):
                         Q_next = torch.max(Q_next, dim=1)[0].repeat(2, 1).t()  # this 2 is bad
                         vlstm_loss += torch.mean(
                             (r_this + self.bert.encoder.gamma*Q_next - Q_this) ** 2)
-                #     breakpoint_flag = (step_num>=100) and (step_num<=105) and (torch.sum(correctness_loss)>0.5)
-                #     if breakpoint_flag:
-                #         print(i)
-                #         print(Q_this)
-                #         print(r_this)
+                    # breakpoint_flag = (step_num>=100) and (step_num<=105) and (torch.sum(correctness_loss)>0.5)
+                    # if breakpoint_flag:
+                    #     print(i)
+                    #     print(Q_this)
+                    #     print(r_this)
                 # if breakpoint_flag:
                 #     breakpoint()
                 outputs = ([vlstm_loss],) + outputs

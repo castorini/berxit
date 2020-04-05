@@ -70,6 +70,8 @@ def plot_acc_time_tradeoff(axis, data, labels, flags):
     time, acc = data
     for i, routine in enumerate(routines):
         if routine.endswith("-Qvlstm"):
+            print(acc[routine])
+            print(time[routine])
             saving = get_speedup(time[routine][0])
             # breakpoint()
             # saving = list(map(lambda x: 1/x, time[routine][0]))
@@ -182,8 +184,8 @@ for model in models:
             model_data = np_load(
                 f"saved_models/{model}/{dataset}/{x}-42/vlstm.npy"
             )
-            model_time_data =[time_data['all_alternate'][0][0]]
-            model_acc_data = [acc_data['all_alternate'][0][0]]
+            model_time_data = []#[time_data['all_alternate'][0][0]]
+            model_acc_data = []#[acc_data['all_alternate'][0][0]]
             for entry in model_data:
                 # if entry[2]<0.2:
                 #     print(entry[2])
