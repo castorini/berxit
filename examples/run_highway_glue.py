@@ -158,6 +158,8 @@ def get_args():
 
     parser.add_argument("--no_comet", action='store_true',
                         help="Don't upload to comet:highway")
+    parser.add_argument("--testset", action='store_true',
+                        help="Output results on the test set")
     parser.add_argument('--logging_steps', type=int, default=50,
                         help="Log every X updates steps.")
     parser.add_argument('--save_steps', type=int, default=50,
@@ -514,7 +516,8 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
 
     results = {}
     for eval_task, eval_output_dir in zip(eval_task_names, eval_outputs_dirs):
-        eval_dataset = load_and_cache_examples(args, eval_task, tokenizer, evaluate=True)
+        eval_dataset = load_and_cache_examples(args, eval_task, tokenizer,
+                                               evaluate=True, testset=args.testset)
 
         if not os.path.exists(eval_output_dir) and args.local_rank in [-1, 0]:
             os.makedirs(eval_output_dir)
@@ -643,6 +646,7 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
             elif args.early_exit_entropy >= 0:
                 save_fname = args.plot_data_dir + \
                              args.model_name_or_path[2:] + \
+                             ("/testset/" if args.testset else "") + \
                              "/entropy_{}.npy".format(args.early_exit_entropy)
                 if not os.path.exists(os.path.dirname(save_fname)):
                     os.makedirs(os.path.dirname(save_fname))
@@ -661,6 +665,20 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
                     "exit_layer_counter",
                     str(exit_layer_counter),
                 )
+                if args.testset:
+                    label_list = processors[eval_task]().get_labels()
+                    eval_task_name = eval_task.upper()
+                    if eval_task_name == 'MNLI':
+                        eval_task_name = 'MNLI-m'
+                    elif eval_task_name == 'MNLI-MM':
+                        eval_task_name = 'MNLI-mm'
+                    submit_fname = args.plot_data_dir + \
+                        args.model_name_or_path[2:] + \
+                        "/testset/{}-{}.tsv".format(args.early_exit_entropy, eval_task_name)
+                    with open(submit_fname, 'w') as fout:
+                        print("index\tprediction", file=fout)
+                        for i, p in enumerate(preds):
+                            print('{}\t{}'.format(i, label_list[p]), file=fout)
 
         output_eval_file = os.path.join(eval_output_dir, prefix, "eval_results.txt")
         with open(output_eval_file, "w") as writer:
@@ -672,15 +690,20 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
     return results
 
 
-def load_and_cache_examples(args, task, tokenizer, evaluate=False):
+def load_and_cache_examples(args, task, tokenizer, evaluate=False, testset=False):
     if args.local_rank not in [-1, 0] and not evaluate:
         torch.distributed.barrier()  # Make sure only the first process in distributed training process the dataset, and the others will use the cache
 
     processor = processors[task]()
     output_mode = output_modes[task]
     # Load data features from cache or dataset file
+    split = 'train'
+    if evaluate:
+        split = 'dev'
+    if testset:
+        split = 'test'
     cached_features_file = os.path.join(args.data_dir, 'cached_{}_{}_{}_{}'.format(
-        'dev' if evaluate else 'train',
+        split,
         list(filter(None, args.model_name_or_path.split('/'))).pop(),
         str(args.max_seq_length),
         str(task)))
@@ -693,8 +716,12 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False):
         if task in ['mnli', 'mnli-mm'] and args.model_type in ['roberta']:
             # HACK(label indices are swapped in RoBERTa pretrained model)
             label_list[1], label_list[2] = label_list[2], label_list[1]
-        examples = processor.get_dev_examples(args.data_dir) if evaluate else processor.get_train_examples(
-            args.data_dir)
+        if not evaluate:
+            examples = processor.get_train_examples(args.data_dir)
+        elif not testset:
+            examples = processor.get_dev_examples(args.data_dir)
+        else:
+            examples = processor.get_test_examples(args.data_dir)
         features = convert_examples_to_features(examples,
                                                 tokenizer,
                                                 label_list=label_list,

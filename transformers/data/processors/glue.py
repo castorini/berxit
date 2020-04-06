@@ -172,6 +172,11 @@ class MrpcProcessor(DataProcessor):
         return self._create_examples(
             self._read_tsv(os.path.join(data_dir, "dev.tsv")), "dev")
 
+    def get_test_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_tsv(os.path.join(data_dir, "test.tsv")), "test")
+
     def get_labels(self):
         """See base class."""
         return ["0", "1"]
@@ -212,6 +217,12 @@ class MnliProcessor(DataProcessor):
             self._read_tsv(os.path.join(data_dir, "dev_matched.tsv")),
             "dev_matched")
 
+    def get_test_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_tsv(os.path.join(data_dir, "test_matched.tsv")),
+            "test_matched")
+
     def get_labels(self):
         """See base class."""
         return ["contradiction", "entailment", "neutral"]
@@ -239,6 +250,12 @@ class MnliMismatchedProcessor(MnliProcessor):
         return self._create_examples(
             self._read_tsv(os.path.join(data_dir, "dev_mismatched.tsv")),
             "dev_matched")
+
+    def get_test_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_tsv(os.path.join(data_dir, "test_mismatched.tsv")),
+            "test_matched")
 
 
 class ColaProcessor(DataProcessor):
@@ -297,6 +314,11 @@ class Sst2Processor(DataProcessor):
         return self._create_examples(
             self._read_tsv(os.path.join(data_dir, "dev.tsv")), "dev")
 
+    def get_test_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_tsv(os.path.join(data_dir, "test.tsv")), "test")
+
     def get_labels(self):
         """See base class."""
         return ["0", "1"]
@@ -334,6 +356,11 @@ class StsbProcessor(DataProcessor):
         """See base class."""
         return self._create_examples(
             self._read_tsv(os.path.join(data_dir, "dev.tsv")), "dev")
+
+    def get_test_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_tsv(os.path.join(data_dir, "test.tsv")), "test")
 
     def get_labels(self):
         """See base class."""
@@ -373,6 +400,11 @@ class QqpProcessor(DataProcessor):
         """See base class."""
         return self._create_examples(
             self._read_tsv(os.path.join(data_dir, "dev.tsv")), "dev")
+
+    def get_test_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_tsv(os.path.join(data_dir, "test.tsv")), "test")
 
     def get_labels(self):
         """See base class."""
@@ -417,6 +449,12 @@ class QnliProcessor(DataProcessor):
             self._read_tsv(os.path.join(data_dir, "dev.tsv")),
             "dev_matched")
 
+    def get_test_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_tsv(os.path.join(data_dir, "test.tsv")),
+            "test_matched")
+
     def get_labels(self):
         """See base class."""
         return ["entailment", "not_entailment"]
@@ -455,6 +493,11 @@ class RteProcessor(DataProcessor):
         """See base class."""
         return self._create_examples(
             self._read_tsv(os.path.join(data_dir, "dev.tsv")), "dev")
+
+    def get_test_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_tsv(os.path.join(data_dir, "test.tsv")), "test")
 
     def get_labels(self):
         """See base class."""
