@@ -161,7 +161,7 @@ class RobertaForSequenceClassification(BertPreTrainedModel):
             # work with highway exits
             highway_losses = []
             goto_next_layer = []
-            for i, highway_exit in enumerate(outputs[-1]):
+            for i, highway_exit in enumerate(outputs[-1]["highway"]):
                 highway_logits = highway_exit[0]
                 if train_strategy=='cascade':
                     if i<self.num_layers-1:

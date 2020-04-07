@@ -665,20 +665,24 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
                     "exit_layer_counter",
                     str(exit_layer_counter),
                 )
-                if args.testset:
-                    label_list = processors[eval_task]().get_labels()
-                    eval_task_name = eval_task.upper()
-                    if eval_task_name == 'MNLI':
-                        eval_task_name = 'MNLI-m'
-                    elif eval_task_name == 'MNLI-MM':
-                        eval_task_name = 'MNLI-mm'
-                    submit_fname = args.plot_data_dir + \
-                        args.model_name_or_path[2:] + \
-                        "/testset/{}-{}.tsv".format(args.early_exit_entropy, eval_task_name)
-                    with open(submit_fname, 'w') as fout:
-                        print("index\tprediction", file=fout)
-                        for i, p in enumerate(preds):
-                            print('{}\t{}'.format(i, label_list[p]), file=fout)
+
+            if args.testset:
+                label_list = processors[eval_task]().get_labels()
+                eval_task_name = eval_task.upper()
+                if eval_task_name == 'MNLI':
+                    eval_task_name = 'MNLI-m'
+                elif eval_task_name == 'MNLI-MM':
+                    eval_task_name = 'MNLI-mm'
+                if 'MNLI' in eval_task_name:
+                    # label_list: contradiction, entailment, neutral
+                    label_list[1], label_list[2] = label_list[2], label_list[1]
+                submit_fname = args.plot_data_dir + \
+                    args.model_name_or_path[2:] + \
+                    "/testset/{}-{}.tsv".format(args.early_exit_entropy, eval_task_name)
+                with open(submit_fname, 'w') as fout:
+                    print("index\tprediction", file=fout)
+                    for i, p in enumerate(preds):
+                        print('{}\t{}'.format(i, label_list[p]), file=fout)
 
         output_eval_file = os.path.join(eval_output_dir, prefix, "eval_results.txt")
         with open(output_eval_file, "w") as writer:
@@ -716,6 +720,7 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False, testset=False
         if task in ['mnli', 'mnli-mm'] and args.model_type in ['roberta']:
             # HACK(label indices are swapped in RoBERTa pretrained model)
             label_list[1], label_list[2] = label_list[2], label_list[1]
+            # after swap: contradiction, neutral, entailment
         if not evaluate:
             examples = processor.get_train_examples(args.data_dir)
         elif not testset:
