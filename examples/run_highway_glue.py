@@ -643,7 +643,7 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
                     str(exit_layer_counter),
                 )
 
-            elif args.early_exit_entropy >= 0:
+            elif args.early_exit_entropy >= -0.5:
                 save_fname = args.plot_data_dir + \
                              args.model_name_or_path[2:] + \
                              ("/testset/" if args.testset else "") + \
