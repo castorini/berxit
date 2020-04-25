@@ -43,6 +43,8 @@ from transformers import (WEIGHTS_NAME, BertConfig,
                                   BertTokenizer,
                                   RobertaConfig,
                                   RobertaTokenizer,
+                                  AlbertConfig,
+                                  AlbertTokenizer,
                                   XLMConfig, XLMForSequenceClassification,
                                   XLMTokenizer, XLNetConfig,
                                   XLNetForSequenceClassification,
@@ -53,6 +55,7 @@ from transformers import (WEIGHTS_NAME, BertConfig,
 
 from transformers.modeling_highway_bert import BertForSequenceClassification
 from transformers.modeling_highway_roberta import RobertaForSequenceClassification
+from transformers.modeling_highway_albert import AlbertForSequenceClassification
 
 from transformers import AdamW, get_linear_schedule_with_warmup
 
@@ -62,13 +65,14 @@ from transformers import glue_processors as processors
 from transformers import glue_convert_examples_to_features as convert_examples_to_features
 
 ALL_MODELS = sum((tuple(conf.pretrained_config_archive_map.keys()) for conf in (BertConfig, XLNetConfig, XLMConfig,
-                                                                                RobertaConfig, DistilBertConfig)), ())
+                                                                                RobertaConfig, AlbertConfig, DistilBertConfig)), ())
 
 MODEL_CLASSES = {
     'bert': (BertConfig, BertForSequenceClassification, BertTokenizer),
     'xlnet': (XLNetConfig, XLNetForSequenceClassification, XLNetTokenizer),
     'xlm': (XLMConfig, XLMForSequenceClassification, XLMTokenizer),
     'roberta': (RobertaConfig, RobertaForSequenceClassification, RobertaTokenizer),
+    'albert': (AlbertConfig, AlbertForSequenceClassification, AlbertTokenizer),
     'distilbert': (DistilBertConfig, DistilBertForSequenceClassification, DistilBertTokenizer)
 }
 
@@ -147,11 +151,7 @@ def get_args():
                         help="The layer for limit training.")
     parser.add_argument("--train_routine",
                         choices=['raw', 'two_stage', 'all', 'self_distil',
-                                 'layer_wise', 'half', 'divide', 'neigh_distil',
-                                 'half-pre_distil', 'half-distil', 'cascade',
-                                 'full_divide', 'conf_cascade', 'raw1', 'all01', 'all0-1',
-                                 'shrink', 'shrink-1', 'shsd-1', 'distil_only',
-                                 'all_alternate', 'alternate-1', 'limit',
+                                 'all_alternate', 'limit', 'layer_wise'
                                  'all_alternate-vlstm', 'all_alternate-Qvlstm'],
                         default='raw', type=str,
                         help="Training routine (a routine can have mutliple stages, each with different strategies.")
@@ -307,10 +307,7 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
                         ("highway" in n) and (any(nd in n for nd in no_decay))],
              'weight_decay': 0.0}
         ]
-    elif train_strategy in ['all', 'self_distil', 'half', 'divide', 'full_divide',
-                            'neigh_distil', 'half-pre_distil', 'half-distil',
-                            'cascade', 'conf_cascade', 'shrink', 'shsd',
-                            'distil_only', 'alternate', 'limit']:
+    elif train_strategy in ['all', 'self_distil', 'alternate', 'limit']:
         optimizer_grouped_parameters = [
             {'params': [p for n, p in model.named_parameters() if
                         not any(nd in n for nd in no_decay)],
@@ -490,15 +487,6 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
                 epoch_iterator.close()
                 break
 
-        model.update_threshold(lambda x: x*0.7)
-
-        if 'cascade' in train_strategy:
-            counter_string = str(layer_example_counter[0]) + ' ' + \
-                ' '.join([
-                    str(int(layer_example_counter[i+1].cpu().item()/layer_example_counter[0]*100))[:2]
-                    for i in range(model.num_layers)])
-            print(counter_string, file=fout)
-
         if args.max_steps > 0 and global_step > args.max_steps:
             train_iterator.close()
             break
@@ -608,8 +596,7 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
             full_cost = len(eval_dataloader) * model.num_layers
             print("Expected saving", actual_cost / full_cost)
 
-            if (args.model_type == 'bert' and model.bert.encoder.use_vlstm) or \
-                    (args.model_type == 'roberta' and model.roberta.encoder.use_vlstm):
+            if model.core.encoder.use_vlstm:
                 vlstm_save_fname = args.plot_data_dir + \
                                    args.output_dir + \
                                    "/vlstm.npy"
@@ -626,8 +613,8 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
                     eval_time,
                     actual_cost / full_cost,
                     print_result,
-                    {'alpha': model.bert.encoder.alpha,
-                     'beta':  model.bert.encoder.beta}
+                    {'alpha': model.core.encoder.alpha,
+                     'beta':  model.core.encoder.beta}
                 ])
                 np.save(vlstm_save_fname, np.array(prev_saver))
                 if profiling:
@@ -847,43 +834,15 @@ def main(args):
                                         config=config,
                                         cache_dir=args.cache_dir if args.cache_dir else None)
 
-    if args.model_type == "bert":
-        model.bert.encoder.set_early_exit_entropy(args.early_exit_entropy)
-        model.bert.init_highway_pooler()
-        if args.train_routine == 'raw1':
-            model.bert.pooler.set_chosen_token(1)
-        if args.train_routine == 'all01':
-            for i in range(model.num_layers):
-                model.bert.encoder.highway[i].pooler.set_chosen_token(1)
-        if args.train_routine in ['all0-1', 'shrink-1', 'shsd-1', 'alternate-1']:
-            for i in range(model.num_layers):
-                model.bert.encoder.highway[i].pooler.set_chosen_token(-1)
-        if args.train_routine.endswith("vlstm"):
-            non_vlstm_output_dir = args.output_dir.replace('-vlstm', '').replace('-Qvlstm', '')
-            tokenizer = tokenizer_class.from_pretrained(non_vlstm_output_dir,
-                                                        do_lower_case=args.do_lower_case)
-            model = model_class.from_pretrained(non_vlstm_output_dir)
-            model.bert.encoder.enable_vlstm(args, Q=args.train_routine.endswith('-Qvlstm'))
-            model.to(args.device)
-
-    else:
-        model.roberta.encoder.set_early_exit_entropy(args.early_exit_entropy)
-        model.roberta.init_highway_pooler()
-        if args.train_routine == 'raw1':
-            model.roberta.pooler.set_chosen_token(1)
-        if args.train_routine == 'all01':
-            for i in range(model.num_layers):
-                model.roberta.encoder.highway[i].pooler.set_chosen_token(1)
-        if args.train_routine in ['all0-1', 'shrink-1', 'shsd-1', 'alternate-1']:
-            for i in range(model.num_layers):
-                model.roberta.encoder.highway[i].pooler.set_chosen_token(-1)
-        if args.train_routine.endswith("vlstm"):
-            non_vlstm_output_dir = args.output_dir.replace('-vlstm', '').replace('-Qvlstm', '')
-            tokenizer = tokenizer_class.from_pretrained(non_vlstm_output_dir,
-                                                        do_lower_case=args.do_lower_case)
-            model = model_class.from_pretrained(non_vlstm_output_dir)
-            model.bert.encoder.enable_vlstm(args, Q=args.train_routine.endswith('-Qvlstm'))
-            model.to(args.device)
+    model.core.encoder.set_early_exit_entropy(args.early_exit_entropy)
+    model.core.init_highway_pooler()
+    if args.train_routine.endswith("vlstm"):
+        non_vlstm_output_dir = args.output_dir.replace('-vlstm', '').replace('-Qvlstm', '')
+        tokenizer = tokenizer_class.from_pretrained(non_vlstm_output_dir,
+                                                    do_lower_case=args.do_lower_case)
+        model = model_class.from_pretrained(non_vlstm_output_dir)
+        model.core.encoder.enable_vlstm(args, Q=args.train_routine.endswith('-Qvlstm'))
+        model.to(args.device)
 
 
     if args.local_rank == 0:
@@ -897,7 +856,7 @@ def main(args):
     if args.do_train:
         train_dataset = load_and_cache_examples(args, args.task_name, tokenizer, evaluate=False)
 
-        if args.train_routine in ["raw", 'raw1']:
+        if args.train_routine in ["raw"]:
             global_step, tr_loss = train(args, train_dataset, model, tokenizer)
             logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
@@ -924,29 +883,17 @@ def main(args):
                                          train_strategy="layer_wise")
             logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
-        elif args.train_routine in ['all', 'all01', 'all0-1']:
+        elif args.train_routine in ['all']:
             global_step, tr_loss = train(args, train_dataset, model, tokenizer,
                                          train_strategy='all')
             logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
-        elif args.train_routine in ['all_alternate', 'alternate-1']:
+        elif args.train_routine in ['all_alternate']:
             global_step, tr_loss = train(args, train_dataset, model, tokenizer,
                                          train_strategy='alternate')
             logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
-        elif args.train_routine in ['shrink', 'shrink-1']:
-            global_step, tr_loss = train(args, train_dataset, model, tokenizer,
-                                         train_strategy='shrink')
-            logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
-
-        elif args.train_routine in ['shsd-1']:
-            global_step, tr_loss = train(args, train_dataset, model, tokenizer,
-                                         train_strategy='shsd')
-            logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
-
-        elif args.train_routine in ['half', 'self_distil', 'neigh_distil', 'divide',
-                                    'full_divide', 'half-pre_distil', 'half_distil',
-                                    'cascade', 'conf_cascade', 'distil_only', 'limit']:
+        elif args.train_routine in ['self_distil', 'limit']:
             global_step, tr_loss = train(args, train_dataset, model, tokenizer,
                                          train_strategy=args.train_routine)
             logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
@@ -986,11 +933,6 @@ def main(args):
     # Evaluation
     results = {}
     if args.do_eval and args.local_rank in [-1, 0]:
-        if 'cascade' in args.train_routine:
-            with open(args.output_dir+"/layer_example_counter") as fin:
-                for i, line in enumerate(fin):
-                    experiment.log_other("Epoch {}".format(i),
-                                         line.strip())
         tokenizer = tokenizer_class.from_pretrained(args.output_dir, do_lower_case=args.do_lower_case)
         checkpoints = [args.output_dir]
         if args.eval_all_checkpoints:
@@ -1003,71 +945,29 @@ def main(args):
             prefix = checkpoint.split('/')[-1] if checkpoint.find('checkpoint') != -1 else ""
 
             model = model_class.from_pretrained(checkpoint)
-            if args.model_type == "bert":
-                model.bert.encoder.set_early_exit_entropy(args.early_exit_entropy)
-                if args.train_routine == 'raw1':
-                    model.bert.pooler.set_chosen_token(1)
-                if args.train_routine == 'all01':
-                    for i in range(model.num_layers):
-                        model.bert.encoder.highway[i].pooler.set_chosen_token(1)
-                if args.train_routine in ['all0-1', 'shrink-1', 'shsd-1', 'alternate-1']:
-                    for i in range(model.num_layers):
-                        model.bert.encoder.highway[i].pooler.set_chosen_token(-1)
-            else:
-                model.roberta.encoder.set_early_exit_entropy(args.early_exit_entropy)
-                if args.train_routine == 'raw1':
-                    model.roberta.pooler.set_chosen_token(1)
-                if args.train_routine == 'all01':
-                    for i in range(model.num_layers):
-                        model.roberta.encoder.highway[i].pooler.set_chosen_token(1)
-                if args.train_routine in ['all0-1', 'shrink-1', 'shsd-1', 'alternate-1']:
-                    for i in range(model.num_layers):
-                        model.roberta.encoder.highway[i].pooler.set_chosen_token(-1)
-
+            model.core.encoder.set_early_exit_entropy(args.early_exit_entropy)
             model.to(args.device)
             if args.train_routine.endswith('-vlstm'):
-                if args.model_type=='bert':
-                    model.bert.encoder.enable_vlstm(args)
-                    experiment.log_other(
-                        'note',
-                        'al={} be={} ga={}'.format(
-                            model.bert.encoder.alpha,
-                            model.bert.encoder.beta,
-                            model.bert.encoder.gamma
-                        )
+                model.core.encoder.enable_vlstm(args)
+                experiment.log_other(
+                    'note',
+                    'al={} be={} ga={}'.format(
+                        model.core.encoder.alpha,
+                        model.core.encoder.beta,
+                        model.core.encoder.gamma
                     )
-                else:
-                    model.roberta.encoder.enable_vlstm(args)
-                    experiment.log_other(
-                        'note',
-                        'al={} be={} ga={}'.format(
-                            model.roberta.encoder.alpha,
-                            model.roberta.encoder.beta,
-                            model.roberta.encoder.gamma
-                        )
-                    )
+                )
                 args.eval_highway = True  # triggers ERS measurement
             elif args.train_routine.endswith('-Qvlstm'):
-                if args.model_type=='bert':
-                    model.bert.encoder.enable_vlstm(args, Q=True)
-                    experiment.log_other(
-                        'note',
-                        'al={} be={} ga={}'.format(
-                            model.bert.encoder.alpha,
-                            model.bert.encoder.beta,
-                            model.bert.encoder.gamma
-                        )
+                model.core.encoder.enable_vlstm(args, Q=True)
+                experiment.log_other(
+                    'note',
+                    'al={} be={} ga={}'.format(
+                        model.core.encoder.alpha,
+                        model.core.encoder.beta,
+                        model.core.encoder.gamma
                     )
-                else:
-                    model.roberta.encoder.enable_vlstm(args, Q=True)
-                    experiment.log_other(
-                        'note',
-                        'al={} be={} ga={}'.format(
-                            model.roberta.encoder.alpha,
-                            model.roberta.encoder.beta,
-                            model.roberta.encoder.gamma
-                        )
-                    )
+                )
                 args.eval_highway = True  # triggers ERS measurement
 
             result = evaluate(args, model, tokenizer, prefix=prefix,
