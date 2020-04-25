@@ -125,13 +125,25 @@ best_learning_rate = {
             "QNLI" : "1e-5",
             "RTE" : "1e-5",
             "WNLI" : "3e-5"
-        }
+        },
+    "albert-base":{
+            "CoLA" : "2e-5",
+            "SST-2" : "2e-5",
+            "MRPC" : "2e-5",
+            "STS-B" : "2e-5",
+            "QQP" : "2e-5",
+            "MNLI" : "2e-5",
+            "QNLI" : "2e-5",
+            "RTE" : "2e-5",
+            "WNLI" : "2e-5"
+        },
 }
 best_epochs = {
     "bert-base": 3,
     "bert-large": 3,
     "roberta-base": 10,
-    "roberta-large": 10
+    "roberta-large": 10,
+    "albert-base": 1,  # just for debug!
 }
 
 
@@ -151,6 +163,15 @@ def submit_run(script, filecount):
         subprocess.run("python submit.py slurm_submit.sh " + str(filecount), shell=True)
 
 
+def get_model_suffix(model):
+    if model.startswith('bert'):
+        return '-uncased'
+    elif model.startswith('albert'):
+        return '-v2'
+    elif model.startswith('roberta'):
+        return ''
+    else:
+        raise NotImplementedError()
 
 
 script_template = {
@@ -236,7 +257,7 @@ if flavor == "eval_highway":
 elif flavor == "train_highway":
     script = script_template[flavor].format(
         model[:model.index('-')],
-        model + ("-uncased" if "bert-" in model else ""),
+        model + get_model_suffix(model),
         dataset,
         dataset,
         best_learning_rate[model][dataset],
@@ -255,7 +276,7 @@ elif flavor == "train_highway":
 elif flavor == "raw":
     script = script_template[flavor].format(
         model[:model.index('-')],
-        model + ("-uncased" if "bert-" in model else ""),
+        model + get_model_suffix(model),
         dataset,
         dataset,
         best_learning_rate[model][dataset],
@@ -324,7 +345,7 @@ elif flavor == 'limit':
     # for i in range(1):
         script = script_template['train_highway'].format(
             model[:model.index('-')],
-            model + ("-uncased" if "bert-" in model else ""),
+            model + get_model_suffix(model),
             dataset,
             dataset,
             best_learning_rate[model][dataset],

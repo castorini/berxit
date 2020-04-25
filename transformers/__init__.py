@@ -41,6 +41,7 @@ from .tokenization_ctrl import CTRLTokenizer
 from .tokenization_xlnet import XLNetTokenizer, SPIECE_UNDERLINE
 from .tokenization_xlm import XLMTokenizer
 from .tokenization_roberta import RobertaTokenizer
+from .tokenization_albert import AlbertTokenizer
 from .tokenization_distilbert import DistilBertTokenizer
 from .tokenization_camembert import CamembertTokenizer
 
@@ -56,6 +57,7 @@ from .configuration_xlnet import XLNetConfig, XLNET_PRETRAINED_CONFIG_ARCHIVE_MA
 from .configuration_ctrl import CTRLConfig, CTRL_PRETRAINED_CONFIG_ARCHIVE_MAP
 from .configuration_xlm import XLMConfig, XLM_PRETRAINED_CONFIG_ARCHIVE_MAP
 from .configuration_roberta import RobertaConfig, ROBERTA_PRETRAINED_CONFIG_ARCHIVE_MAP
+from .configuration_albert import AlbertConfig, ALBERT_PRETRAINED_CONFIG_ARCHIVE_MAP
 from .configuration_distilbert import DistilBertConfig, DISTILBERT_PRETRAINED_CONFIG_ARCHIVE_MAP
 from .configuration_camembert import CamembertConfig, CAMEMBERT_PRETRAINED_CONFIG_ARCHIVE_MAP
 
