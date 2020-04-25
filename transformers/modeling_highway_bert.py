@@ -65,37 +65,30 @@ class BertEncoder(nn.Module):
 
         self.early_exit_entropy = [-1 for _ in range(config.num_hidden_layers)]
 
-        self.use_vlstm = False
-        self.init_vlstm()
+        self.use_Qmodule = False
+        self.init_Qmodule()
 
-    def init_vlstm(self):
+    def init_Qmodule(self):
         # hyperparameters for balancing loss
         self.alpha = 0.01
         self.beta = 0.6
         self.gamma = 1.0
-        self.lamb = 0.0
 
-        # vlstm itself
-        self.vlstm_size = 10
-        self.vlstm = nn.LSTMCell(
-            input_size=self.hidden_size,
-            hidden_size=self.vlstm_size
-        )
-        self.vlstm_classifier = nn.Linear(self.vlstm_size + 4, 2)
+        # Qmodule itself
+        self.Qmodule_size = 10
+        self.Qmodule_classifier = nn.Linear(self.Qmodule_size + 4, 2)
         # +4: 3 for logits, 1 for entropy (0 padding for regression tasks)
-        self.vlstm_activation = nn.Tanh()
+        self.Qmodule_activation = nn.Tanh()
 
-        self.pool_1d = torch.nn.AdaptiveAvgPool1d(self.vlstm_size)
+        self.pool_1d = torch.nn.AdaptiveAvgPool1d(self.Qmodule_size)
 
-    def enable_vlstm(self, args, Q=False):
+    def enable_Qmodule(self, args):
         if args.alpha is not None:
             self.alpha = args.alpha
         if args.beta is not None:
             self.beta = args.beta
         if args.gamma is not None:
             self.gamma = args.gamma
-        if args.lamb is not None:
-            self.lamb = args.lamb
 
         self.num_labels = 2
         if args.task_name in ['sts-b']:
@@ -103,9 +96,8 @@ class BertEncoder(nn.Module):
         elif args.task_name in ['mnli']:
             self.num_labels = 3
 
-        self.use_vlstm = True
-        self.vlstm_activation = nn.Tanh() if Q else nn.Softmax(dim=1)
-        print(f'vlstm initialized, Q={Q}')
+        self.use_Qmodule = True
+        print(f'Qmodule initialized')
 
     def set_early_exit_entropy(self, x):
         print(x)
@@ -127,14 +119,13 @@ class BertEncoder(nn.Module):
         all_attentions = ()
         all_highway_exits = ()
 
-        vlstm_hc_tuple = None
-        vlstm_outputs = []
-        vlstm_classifier_outputs = []
+        Qmodule_outputs = []
+        Qmodule_classifier_outputs = []
 
         batch_size = hidden_states.shape[0]
         device = hidden_states.device
 
-        if self.use_vlstm:
+        if self.use_Qmodule:
             if self.num_labels == 2:
                 zeros = torch.tensor(
                     [[0.0] for _ in range(batch_size)]).to(device)
@@ -165,21 +156,19 @@ class BertEncoder(nn.Module):
 
             highway_entropy = entropy(highway_exit[0])
 
-            # the block for vlstm
-            if self.use_vlstm:
-                with torch.autograd.profiler.record_function('vlstm'):
+            # the block for Qmodule
+            if self.use_Qmodule:
+                with torch.autograd.profiler.record_function('qmodule'):
                     pooling_out = self.pool_1d(highway_exit[1].unsqueeze(0)).squeeze(0)
                     if self.num_labels==3:
-                        vlstm_classifier_input = torch.cat([
-                            # vlstm_hc_tuple[0],
+                        Qmodule_classifier_input = torch.cat([
                             pooling_out,
                             highway_exit[0],
                             entropy(highway_exit[0]).unsqueeze(1)
                         ], dim=1)
                     elif self.num_labels==2:
                         # add extra zero-vector for shape consistence
-                        vlstm_classifier_input = torch.cat([
-                            # vlstm_hc_tuple[0],
+                        Qmodule_classifier_input = torch.cat([
                             pooling_out,
                             highway_exit[0],
                             highway_entropy.unsqueeze(1),
@@ -187,16 +176,15 @@ class BertEncoder(nn.Module):
                         ], dim=1)
                     elif self.num_labels==1:
                         # add extra zero-vector for shape consistence
-                        vlstm_classifier_input = torch.cat([
-                            # vlstm_hc_tuple[0],
+                        Qmodule_classifier_input = torch.cat([
                             pooling_out,
                             highway_exit[0],
                             zeros
                         ], dim=1)
-                    vlstm_classifier_output = self.vlstm_activation(
-                        self.vlstm_classifier(vlstm_classifier_input)
+                    Qmodule_classifier_output = self.Qmodule_activation(
+                        self.Qmodule_classifier(Qmodule_classifier_input)
                     )
-                    vlstm_classifier_outputs.append(vlstm_classifier_output)
+                    Qmodule_classifier_outputs.append(Qmodule_classifier_output)
 
             if not self.training:
                 with torch.autograd.profiler.record_function('earlyexit'):
@@ -204,10 +192,13 @@ class BertEncoder(nn.Module):
                     all_highway_exits = all_highway_exits + (highway_exit,)
 
                     # if np.random.rand() < 0.1:  # compare against random exit
-                    if (i+1 < self.num_layers) and (
-                            (self.use_vlstm and torch.argmax(vlstm_classifier_output)==1) or \
-                            (not self.use_vlstm and highway_entropy < self.early_exit_entropy[i]) \
-                        ):
+                    if (
+                            (i+1 < self.num_layers)
+                        and (
+                                (self.use_Qmodule and torch.argmax(Qmodule_classifier_output)==1)
+                             or (not self.use_Qmodule and highway_entropy < self.early_exit_entropy[i])
+                            )
+                    ):
                         new_output = (highway_exit[0],) + current_outputs[1:] + \
                                      ({'highway': all_highway_exits},)
                         raise HighwayException(new_output, i+1)
@@ -225,8 +216,8 @@ class BertEncoder(nn.Module):
             outputs = outputs + (all_attentions,)
 
         outputs = outputs + ({"highway": all_highway_exits},)
-        if self.use_vlstm:
-            outputs[-1]["vlstm"] = (vlstm_outputs, vlstm_classifier_outputs)
+        if self.use_Qmodule:
+            outputs[-1]["qmodule"] = (Qmodule_outputs, Qmodule_classifier_outputs)
 
         return outputs  # last-layer hidden state, (all hidden states), (all attentions), all highway exits
 
@@ -552,21 +543,8 @@ class BertForSequenceClassification(BertPreTrainedModel):
 
             # loss (first entry of outputs), is no longer one variable, but a list of them
 
-            if train_strategy.endswith("-vlstm"):
-                # basically doesn't work
-                vlstm_loss = 0
-                loss_fct = CrossEntropyLoss()
-                for i in range(self.num_layers - 1):
-                    vlstm_pred = outputs[-1]['vlstm'][1][i]
-                    vlstm_gold = torch.eq(
-                        torch.argmax(outputs[-1]['highway'][i][0], dim=1),
-                        labels
-                    ).long()  # 0 for wrong/continue, 1 for right/exit
-                    vlstm_loss += loss_fct(vlstm_pred, vlstm_gold)
-                    vlstm_loss += self.core.encoder.lamb * torch.mean(vlstm_pred[:, 0])
-                outputs = ([vlstm_loss],) + outputs
-            elif train_strategy.endswith("-Qvlstm"):
-                vlstm_loss = 0
+            if train_strategy.endswith("-Qvlstm"):
+                Qmodule_loss = 0
                 ongoing = torch.ones([batch_size, 1]).to(device)
                 for i in range(self.num_layers-1):
                     if self.num_labels==1:
@@ -575,13 +553,13 @@ class BertForSequenceClassification(BertPreTrainedModel):
                             2
                         )
                     else:
-                        vlstm_gold = torch.eq(
+                        Qmodule_gold = torch.eq(
                             torch.argmax(outputs[-1]['highway'][i][0], dim=1),
                             labels
                         ).long()  # 0 for wrong/continue, 1 for right/exit
-                        correctness_loss = 0.99 - vlstm_gold.float()*0.98
+                        correctness_loss = 0.99 - Qmodule_gold.float()*0.98
                         # soft labels: 1->0.01, 0->0.99
-                    Q_this = outputs[-1]['vlstm'][1][i]  # Q_i
+                    Q_this = outputs[-1]['qmodule'][1][i]  # Q_i
                     a_0_reward = torch.tensor([-self.core.encoder.alpha]).to(device)  # reward for continue
                     r_this = torch.stack([
                         a_0_reward.repeat(batch_size),
@@ -591,13 +569,13 @@ class BertForSequenceClassification(BertPreTrainedModel):
                     r_this = r_this * ongoing # only ongoing samples have reward
                     ongoing = ongoing * torch.eq(torch.argmax(Q_this, dim=1), 0).unsqueeze(1)
                     if i == self.num_layers-2:
-                        vlstm_loss += torch.mean(
+                        Qmodule_loss += torch.mean(
                             (r_this - Q_this) ** 2
                         )
                     else:
-                        Q_next = outputs[-1]['vlstm'][1][i+1]  # Q_{i+1}
+                        Q_next = outputs[-1]['qmodule'][1][i+1]  # Q_{i+1}
                         Q_next = torch.max(Q_next, dim=1)[0].repeat(2, 1).t()  # this 2 is bad
-                        vlstm_loss += torch.mean(
+                        Qmodule_loss += torch.mean(
                             (r_this + self.core.encoder.gamma*Q_next - Q_this) ** 2)
                     # breakpoint_flag = (step_num>=100) and (step_num<=105) and (torch.sum(correctness_loss)>0.5)
                     # if breakpoint_flag:
@@ -606,7 +584,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
                     #     print(r_this)
                 # if breakpoint_flag:
                 #     breakpoint()
-                outputs = ([vlstm_loss],) + outputs
+                outputs = ([Qmodule_loss],) + outputs
             elif train_strategy == 'raw':
                 outputs = ([loss],) + outputs
             elif train_strategy.startswith("limit"):
