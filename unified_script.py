@@ -143,7 +143,7 @@ best_epochs = {
     "bert-large": 3,
     "roberta-base": 10,
     "roberta-large": 10,
-    "albert-base": 1,  # just for debug!
+    "albert-base": 3,
 }
 
 

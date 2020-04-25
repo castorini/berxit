@@ -521,8 +521,6 @@ class BertForSequenceClassification(BertPreTrainedModel):
 
             # work with highway exits
             highway_losses = []
-            # raw_highway_losses = []
-            goto_next_layer = []
             for i, highway_exit in enumerate(outputs[-1]["highway"]):
                 highway_logits = highway_exit[0]
 

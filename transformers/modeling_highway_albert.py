@@ -63,37 +63,31 @@ class AlbertEncoder(nn.Module):
         self.highway = nn.ModuleList([BertHighway(config) for _ in range(config.num_hidden_layers)])
 
         self.early_exit_entropy = [-1 for _ in range(config.num_hidden_layers)]
-        self.use_vlstm = False
-        self.init_vlstm()
 
-    def init_vlstm(self):
+        self.use_Qmodule = False
+        self.init_Qmodule()
+
+    def init_Qmodule(self):
         # hyperparameters for balancing loss
         self.alpha = 0.01
         self.beta = 0.6
         self.gamma = 1.0
-        self.lamb = 0.0
 
-        # vlstm itself
-        self.vlstm_size = 10
-        self.vlstm = nn.LSTMCell(
-            input_size=self.hidden_size,
-            hidden_size=self.vlstm_size
-        )
-        self.vlstm_classifier = nn.Linear(self.vlstm_size + 4, 2)
+        # Qmodule itself
+        self.Qmodule_size = 10
+        self.Qmodule_classifier = nn.Linear(self.Qmodule_size + 4, 2)
         # +4: 3 for logits, 1 for entropy (0 padding for regression tasks)
-        self.vlstm_activation = nn.Tanh()
+        self.Qmodule_activation = nn.Tanh()
 
-        self.pool_1d = torch.nn.AdaptiveAvgPool1d(self.vlstm_size)
+        self.pool_1d = torch.nn.AdaptiveAvgPool1d(self.Qmodule_size)
 
-    def enable_vlstm(self, args, Q=False):
+    def enable_Qmodule(self, args):
         if args.alpha is not None:
             self.alpha = args.alpha
         if args.beta is not None:
             self.beta = args.beta
         if args.gamma is not None:
             self.gamma = args.gamma
-        if args.lamb is not None:
-            self.lamb = args.lamb
 
         self.num_labels = 2
         if args.task_name in ['sts-b']:
@@ -101,9 +95,8 @@ class AlbertEncoder(nn.Module):
         elif args.task_name in ['mnli']:
             self.num_labels = 3
 
-        self.use_vlstm = True
-        self.vlstm_activation = nn.Tanh() if Q else nn.Softmax(dim=1)
-        print(f'vlstm initialized, Q={Q}')
+        self.use_Qmodule = True
+        print(f'Qmodule initialized')
 
     def set_early_exit_entropy(self, x):
         print(x)
@@ -124,11 +117,26 @@ class AlbertEncoder(nn.Module):
         hidden_states = self.embedding_hidden_mapping_in(hidden_states)
 
         all_attentions = ()
+        all_hidden_states = ()
+        all_highway_exits = ()
+
+        Qmodule_outputs = []
+        Qmodule_classifier_outputs = []
+
+        batch_size = hidden_states.shape[0]
+        device = hidden_states.device
+
+        if self.use_Qmodule:
+            if self.num_labels == 2:
+                zeros = torch.tensor(
+                    [[0.0] for _ in range(batch_size)]).to(device)
+            elif self.num_labels == 1:
+                zeros = torch.tensor(
+                    [[0.0, 0.0, 0.0] for _ in range(batch_size)]).to(device)
 
         if self.output_hidden_states:
+            # this is different from BERT! the output of embedding layer is included
             all_hidden_states = (hidden_states,)
-
-        # TODO: early exit and qvlstm
 
         for i in range(self.config.num_hidden_layers):
             """
@@ -152,18 +160,83 @@ class AlbertEncoder(nn.Module):
             )
             hidden_states = layer_group_output[0]
 
+            current_outputs = (hidden_states,)
             if self.output_attentions:
                 all_attentions = all_attentions + layer_group_output[-1]
-
             if self.output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_states,)
+
+            # the block for highway
+            with torch.autograd.profiler.record_function('highway'):
+                highway_exit = self.highway[i](current_outputs)
+                # logits, pooled_output
+
+            highway_entropy = entropy(highway_exit[0])
+
+            # the block for Qmodule
+            if self.use_Qmodule:
+                with torch.autograd.profiler.record_function('qmodule'):
+                    pooling_out = self.pool_1d(highway_exit[1].unsqueeze(0)).squeeze(0)
+                    if self.num_labels==3:
+                        Qmodule_classifier_input = torch.cat([
+                            pooling_out,
+                            highway_exit[0],
+                            entropy(highway_exit[0]).unsqueeze(1)
+                        ], dim=1)
+                    elif self.num_labels==2:
+                        # add extra zero-vector for shape consistence
+                        Qmodule_classifier_input = torch.cat([
+                            pooling_out,
+                            highway_exit[0],
+                            highway_entropy.unsqueeze(1),
+                            zeros
+                        ], dim=1)
+                    elif self.num_labels==1:
+                        # add extra zero-vector for shape consistence
+                        Qmodule_classifier_input = torch.cat([
+                            pooling_out,
+                            highway_exit[0],
+                            zeros
+                        ], dim=1)
+                    Qmodule_classifier_output = self.Qmodule_activation(
+                        self.Qmodule_classifier(Qmodule_classifier_input)
+                    )
+                    Qmodule_classifier_outputs.append(Qmodule_classifier_output)
+
+            if not self.training:
+                with torch.autograd.profiler.record_function('earlyexit'):
+                    highway_exit = highway_exit + (highway_entropy,)  # logits, hidden_states(?), entropy
+                    all_highway_exits = all_highway_exits + (highway_exit,)
+
+                    # if np.random.rand() < 0.1:  # compare against random exit
+                    if (
+                            (i+1 < self.num_layers)
+                        and (
+                                (self.use_Qmodule and torch.argmax(Qmodule_classifier_output)==1)
+                             or (not self.use_Qmodule and highway_entropy < self.early_exit_entropy[i])
+                            )
+                    ):
+                        new_output = (highway_exit[0],) + current_outputs[1:] + \
+                                     ({'highway': all_highway_exits},)
+                        raise HighwayException(new_output, i+1)
+            else:
+                all_highway_exits = all_highway_exits + (highway_exit,)
+
+        # Add last layer
+        if self.output_hidden_states:
+            all_hidden_states = all_hidden_states + (hidden_states,)
 
         outputs = (hidden_states,)
         if self.output_hidden_states:
             outputs = outputs + (all_hidden_states,)
         if self.output_attentions:
             outputs = outputs + (all_attentions,)
-        return outputs  # last-layer hidden state, (all hidden states), (all attentions)
+
+        outputs = outputs + ({"highway": all_highway_exits},)
+        if self.use_Qmodule:
+            outputs[-1]["qmodule"] = (Qmodule_outputs, Qmodule_classifier_outputs)
+
+        return outputs  # last-layer hidden state, (all hidden states), (all attentions), all highway exits
 
 
 class AlbertModel(AlbertPreTrainedModel):
@@ -257,9 +330,7 @@ class AlbertModel(AlbertPreTrainedModel):
 
         pooled_output = self.pooler_activation(self.pooler(sequence_output[:, 0]))
 
-        outputs = (sequence_output, pooled_output) + encoder_outputs[
-            1:
-        ]  # add hidden_states and attentions if they are here
+        outputs = (sequence_output, pooled_output) + encoder_outputs[1:]  # add hidden_states and attentions if they are here
         return outputs
 
 
@@ -291,25 +362,37 @@ class AlbertForSequenceClassification(AlbertPreTrainedModel):
         step_num=-1,
     ):
 
-        # TODO: all sorts of strategies
+        exit_layer = self.num_layers
+        try:
+            outputs = self.core(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                token_type_ids=token_type_ids,
+                position_ids=position_ids,
+                head_mask=head_mask,
+                inputs_embeds=inputs_embeds,
+            )
+            pooled_output = outputs[1]
+            pooled_output = self.dropout(pooled_output)
+            logits = self.classifier(pooled_output)
+            outputs = (logits,) + outputs[2:]  # add hidden states and attention if they are here
+        except HighwayException as e:
+            outputs = e.message
+            exit_layer = e.exit_layer
+            logits = outputs[0]
 
-        outputs = self.core(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            token_type_ids=token_type_ids,
-            position_ids=position_ids,
-            head_mask=head_mask,
-            inputs_embeds=inputs_embeds,
-        )
+        batch_size = logits.shape[0]
+        device = logits.device
 
-        pooled_output = outputs[1]
 
-        pooled_output = self.dropout(pooled_output)
-        logits = self.classifier(pooled_output)
-
-        outputs = (logits,) + outputs[2:]  # add hidden states and attention if they are here
-
+        if not self.training:
+            original_entropy = entropy(logits)
+            highway_entropy = []
+            highway_logits_all = []
         if labels is not None:
+            if layer_example_counter is not None:
+                layer_example_counter[0] += len(labels)
+
             if self.num_labels == 1:
                 #  We are doing regression
                 loss_fct = MSELoss()
@@ -317,6 +400,117 @@ class AlbertForSequenceClassification(AlbertPreTrainedModel):
             else:
                 loss_fct = CrossEntropyLoss()
                 loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
-            outputs = (loss,) + outputs
+
+            # work with highway exits
+            highway_losses = []
+            for i, highway_exit in enumerate(outputs[-1]["highway"]):
+                highway_logits = highway_exit[0]
+
+                if not self.training:
+                    highway_logits_all.append(highway_logits)
+                    highway_entropy.append(highway_exit[2])
+                if self.num_labels == 1:
+                    #  We are doing regression
+                    loss_fct = MSELoss()
+                    highway_loss = loss_fct(highway_logits.view(-1),
+                                            labels.view(-1))
+                else:
+                    loss_fct = CrossEntropyLoss(reduction='mean')
+                    highway_loss = loss_fct(highway_logits.view(-1, self.num_labels),
+                                            labels.view(-1))
+                highway_losses.append(highway_loss)
+                # raw_highway_losses.append(raw_highway_loss)
+
+            # loss (first entry of outputs), is no longer one variable, but a list of them
+
+            if train_strategy.endswith("-Qvlstm"):
+                Qmodule_loss = 0
+                ongoing = torch.ones([batch_size, 1]).to(device)
+                for i in range(self.num_layers-1):
+                    if self.num_labels==1:
+                        correctness_loss = torch.pow(
+                            outputs[-1]['highway'][i][0].squeeze() - labels,
+                            2
+                        )
+                    else:
+                        Qmodule_gold = torch.eq(
+                            torch.argmax(outputs[-1]['highway'][i][0], dim=1),
+                            labels
+                        ).long()  # 0 for wrong/continue, 1 for right/exit
+                        correctness_loss = 0.99 - Qmodule_gold.float()*0.98
+                        # soft labels: 1->0.01, 0->0.99
+                    Q_this = outputs[-1]['qmodule'][1][i]  # Q_i
+                    a_0_reward = torch.tensor([-self.core.encoder.alpha]).to(device)  # reward for continue
+                    r_this = torch.stack([
+                        a_0_reward.repeat(batch_size),
+                        - self.core.encoder.beta * correctness_loss
+                        # - self.beta * raw_highway_losses[i].detach()
+                    ], dim=1)
+                    r_this = r_this * ongoing # only ongoing samples have reward
+                    ongoing = ongoing * torch.eq(torch.argmax(Q_this, dim=1), 0).unsqueeze(1)
+                    if i == self.num_layers-2:
+                        Qmodule_loss += torch.mean(
+                            (r_this - Q_this) ** 2
+                        )
+                    else:
+                        Q_next = outputs[-1]['qmodule'][1][i+1]  # Q_{i+1}
+                        Q_next = torch.max(Q_next, dim=1)[0].repeat(2, 1).t()  # this 2 is bad
+                        Qmodule_loss += torch.mean(
+                            (r_this + self.core.encoder.gamma*Q_next - Q_this) ** 2)
+                    # breakpoint_flag = (step_num>=100) and (step_num<=105) and (torch.sum(correctness_loss)>0.5)
+                    # if breakpoint_flag:
+                    #     print(i)
+                    #     print(Q_this)
+                    #     print(r_this)
+                # if breakpoint_flag:
+                #     breakpoint()
+                outputs = ([Qmodule_loss],) + outputs
+            elif train_strategy == 'raw':
+                outputs = ([loss],) + outputs
+            elif train_strategy.startswith("limit"):
+                target_layer = int(train_strategy[5:])
+                if target_layer+1 == self.num_layers:
+                    outputs = ([loss],) + outputs
+                else:
+                    outputs = ([highway_losses[target_layer]],) + outputs
+            elif train_strategy=='only_highway':
+                outputs = ([sum(highway_losses[:-1])],) + outputs
+                # exclude the final highway, of course
+            elif train_strategy in ['all']:
+                outputs = ([sum(highway_losses[:-1])+loss],) + outputs
+                # all highways (exclude the final one), plus the original classifier
+            elif train_strategy == 'alternate':
+                if step_num%2==0:
+                    outputs = ([loss],) + outputs
+                else:
+                    outputs = ([sum(highway_losses[:-1])+loss],) + outputs
+                    # all highways (exclude the final one), plus the original classifier
+            elif train_strategy=='self_distil':
+                # the following input_logits are before softmax
+                # final layer logits: logits
+                # logits from layer[i]: outputs[-1]["highway"][i][0]
+                temperature = 1.0
+                softmax_fct = nn.Softmax(dim=1)
+                teacher_softmax = softmax_fct(logits.detach()) / temperature
+                distil_losses = []
+                for i in range(self.num_layers-1):
+                    student_softmax = softmax_fct(outputs[-1]["highway"][i][0]) / temperature
+                    distil_losses.append(
+                        - temperature**2 * torch.sum(
+                            teacher_softmax * torch.log(student_softmax))
+                    )
+                outputs = ([sum(highway_losses[:-1]) + loss + sum(distil_losses)],)\
+                          + outputs
+            elif train_strategy=='layer_wise':
+                outputs = (highway_losses[:-1]+[loss],) + outputs
+            else:
+                raise NotImplementedError("Wrong training strategy!")
+
+        if not self.training:
+            outputs = outputs + ((original_entropy, highway_entropy), exit_layer)
+            if output_layer >= 0:
+                outputs = (outputs[0],) +\
+                          (highway_logits_all[output_layer],) +\
+                          outputs[2:]  ## use the highway of the last layer
 
         return outputs  # (loss), logits, (hidden_states), (attentions)
