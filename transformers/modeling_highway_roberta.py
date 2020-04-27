@@ -48,7 +48,8 @@ class RobertaForSequenceClassification(BertPreTrainedModel):
         self.num_labels = config.num_labels
         self.num_layers = config.num_hidden_layers
 
-        self.core = RobertaModel(config)
+        self.roberta = RobertaModel(config)
+        self.core = self.roberta
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         self.classifier = nn.Linear(config.hidden_size, self.config.num_labels)
 
@@ -62,7 +63,7 @@ class RobertaForSequenceClassification(BertPreTrainedModel):
 
         exit_layer = self.num_layers
         try:
-            outputs = self.core(input_ids,
+            outputs = self.roberta(input_ids,
                                    attention_mask=attention_mask,
                                    token_type_ids=token_type_ids,
                                    position_ids=position_ids,

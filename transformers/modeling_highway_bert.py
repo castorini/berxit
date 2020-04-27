@@ -469,7 +469,8 @@ class BertForSequenceClassification(BertPreTrainedModel):
         self.num_layers = config.num_hidden_layers
         self.hidden_size = config.hidden_size
 
-        self.core = BertModel(config)
+        self.bert = BertModel(config)
+        self.core = self.bert
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         self.classifier = nn.Linear(config.hidden_size, self.config.num_labels)
 
@@ -482,7 +483,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
 
         exit_layer = self.num_layers
         try:
-            outputs = self.core(input_ids,
+            outputs = self.bert(input_ids,
                                 attention_mask=attention_mask,
                                 token_type_ids=token_type_ids,
                                 position_ids=position_ids,

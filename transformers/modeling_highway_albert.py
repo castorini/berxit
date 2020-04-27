@@ -341,7 +341,8 @@ class AlbertForSequenceClassification(AlbertPreTrainedModel):
         self.num_layers = config.num_hidden_layers
         self.hidden_size = config.hidden_size
 
-        self.core = AlbertModel(config)
+        self.albert = AlbertModel(config)
+        self.core = self.albert
         self.dropout = nn.Dropout(config.classifier_dropout_prob)
         self.classifier = nn.Linear(config.hidden_size, self.config.num_labels)
 
@@ -364,7 +365,7 @@ class AlbertForSequenceClassification(AlbertPreTrainedModel):
 
         exit_layer = self.num_layers
         try:
-            outputs = self.core(
+            outputs = self.albert(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
                 token_type_ids=token_type_ids,

@@ -202,7 +202,8 @@ experiment = cm.Experiment(project_name='useless-debug' if args.no_comet else 'h
                            log_code=False,
                            auto_output_logging=False,
                            parse_args=False,
-                           auto_metric_logging=False)
+                           auto_metric_logging=False,
+                           display_summary=0)
 experiment.set_name(args.log_id + '--' + str(datetime.date.today()))
 experiment.log_parameters({
     "log_id": args.log_id,
@@ -545,14 +546,14 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
                     if output_layer >= 0:
                         inputs['output_layer'] = output_layer
                     outputs = model(**inputs)
-                    entropy_collection.append(
-                        [x.cpu().item() for x in outputs[3][1][:-1]] + [outputs[3][0].cpu().item()]
-                    )
-                    maxlogit_collection.append(
-                        [torch.max(torch.softmax(x[0], dim=1)).cpu().item() for x in outputs[2]['highway'][:-1]] +\
-                        [torch.max(torch.softmax(outputs[1], dim=1)).cpu().item()]
-                    )
                     if eval_highway:
+                        entropy_collection.append(
+                            [x.cpu().item() for x in outputs[3][1][:-1]] + [outputs[3][0].cpu().item()]
+                        )
+                        maxlogit_collection.append(
+                            [torch.max(torch.softmax(x[0], dim=1)).cpu().item() for x in outputs[2]['highway'][:-1]] +\
+                            [torch.max(torch.softmax(outputs[1], dim=1)).cpu().item()]
+                        )
                         exit_layer_counter[outputs[-1]] += 1
                     tmp_eval_loss, logits = outputs[:2]
                     tmp_eval_loss = tmp_eval_loss[-1]
@@ -587,6 +588,13 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
             preds = np.squeeze(preds)
         result = compute_metrics(eval_task, preds, out_label_ids)
         results.update(result)
+
+        output_eval_file = os.path.join(eval_output_dir, prefix, "eval_results.txt")
+        with open(output_eval_file, "w") as writer:
+            logger.info("***** Eval results {} *****".format(prefix))
+            for key in sorted(result.keys()):
+                logger.info("  %s = %s", key, str(result[key]))
+                writer.write("%s = %s\n" % (key, str(result[key])))
 
         if eval_highway:
             print("Exit layer counter", exit_layer_counter)
@@ -668,13 +676,6 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
                     print("index\tprediction", file=fout)
                     for i, p in enumerate(preds):
                         print('{}\t{}'.format(i, label_list[p]), file=fout)
-
-        output_eval_file = os.path.join(eval_output_dir, prefix, "eval_results.txt")
-        with open(output_eval_file, "w") as writer:
-            logger.info("***** Eval results {} *****".format(prefix))
-            for key in sorted(result.keys()):
-                logger.info("  %s = %s", key, str(result[key]))
-                writer.write("%s = %s\n" % (key, str(result[key])))
 
     return results
 
