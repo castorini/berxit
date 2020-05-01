@@ -964,7 +964,10 @@ def main(args):
             print("result: {}".format(print_result))
             experiment.log_metric("final result", print_result)
             if args.train_routine=='limit':
-                np.save(args.output_dir+'/limit.npy', np.array([print_result]))
+                save_fname = args.plot_data_dir + f"/layer-{args.limit_layer}.npy"
+                if not os.path.exists(os.path.dirname(save_fname)):
+                    os.makedirs(os.path.dirname(save_fname))
+                np.save(save_fname, np.array([print_result]))
 
             if args.early_exit_entropy == -1 and args.eval_each_highway:
                 last_layer_results = print_result
