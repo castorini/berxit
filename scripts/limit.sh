@@ -12,9 +12,9 @@ export CUDA_VISIBLE_DEVICES=0
 
 PATH_TO_DATA=/h/xinji/projects/GLUE
 
-MODEL_TYPE=bert
-MODEL_SIZE=base  # change partition to t4 if large
-DATASET=MRPC
+MODEL_TYPE=${1}
+MODEL_SIZE=${2}  # change partition to t4 if large
+DATASET=${3}
 SEED=42
 
 MODEL_NAME=${MODEL_TYPE}-${MODEL_SIZE}
@@ -31,9 +31,10 @@ then
   LAYERS=12
 fi
 
+echo ${MODEL_TYPE}-${MODEL_SIZE}/$DATASET
 for LIMIT in `seq 0 $(( $LAYERS - 1 ))`;
 do
-  echo $LIMIT
+  echo 'Limit layer' $LIMIT
   python -um examples.run_highway_glue \
     --model_type $MODEL_TYPE \
     --model_name_or_path $MODEL_NAME \
@@ -56,4 +57,5 @@ do
     --train_routine limit \
     --log_id $SLURM_JOB_ID \
     --limit_layer $LIMIT
+  exit 0
 done

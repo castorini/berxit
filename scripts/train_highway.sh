@@ -12,9 +12,9 @@ export CUDA_VISIBLE_DEVICES=0
 
 PATH_TO_DATA=/h/xinji/projects/GLUE
 
-MODEL_TYPE=bert
-MODEL_SIZE=base  # change partition to t4 if large
-DATASET=MRPC
+MODEL_TYPE=${1}
+MODEL_SIZE=${2}  # change partition to t4 if large
+DATASET=${3}
 SEED=42
 ROUTINE=two_stage
 ALPHA=0.1  # for Q module
@@ -29,6 +29,7 @@ then
 fi
 
 
+echo ${MODEL_TYPE}-${MODEL_SIZE}/$DATASET
 python -um examples.run_highway_glue \
   --model_type $MODEL_TYPE \
   --model_name_or_path $MODEL_NAME \
