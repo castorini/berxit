@@ -17,11 +17,9 @@ formal_name = {
 color_pool = plt.rcParams['axes.prop_cycle'].by_key()['color']
 colors = {
     "two_stage": color_pool[0],
-    "joint": color_pool[1],
-    "alternating": color_pool[2],
-    "alternating-Q": color_pool[2],
-    "weight-tok": color_pool[3],
-    "alternate-1": color_pool[4],
+    "all": color_pool[1],
+    "all_alternate": color_pool[2],
+    "all_alternate-Qvlstm": color_pool[2],
     "limit": color_pool[5]
 }
 
@@ -41,15 +39,16 @@ def plot_acc_by_layer(axis, data):
 
     if data.routine.endswith('Qvlstm'):
         # Qmodule acc
-        axis.plot(*data.etp_acc, 'o:', color=colors[data.formal_routine],
+        axis.plot(*data.etp_acc, 'o:', color=colors[data.routine],
                   linewidth=1, markersize=2, label=data.formal_routine)
     else:
         # layer-wise acc
-        axis.plot(range(1, 1+len(data.layer_acc)), data.layer_acc,
-                  'o-', color=colors[data.formal_routine],
-                  label=data.formal_routine, linewidth=1, markersize=2)
+        # axis.plot(range(1, 1+len(data.layer_acc)), data.layer_acc,
+        #           'o-', color=colors[data.routine],
+        #           label=data.formal_routine, linewidth=1, markersize=2)
         # entropy-based acc
-        axis.plot(*data.etp_acc, 'o-.', color=colors[data.formal_routine],
+        axis.plot(*data.etp_acc, 'o-.', color=colors[data.routine],
+                  label=data.formal_routine,
                   linewidth=1, markersize=2)
 
 
@@ -74,5 +73,5 @@ for i_dataset, dataset in enumerate(datasets):
 
 
 plt.tight_layout()
-plt.show()
-# plt.savefig(f"{model}.pdf")
+# plt.show()
+plt.savefig(f"{model}.pdf")

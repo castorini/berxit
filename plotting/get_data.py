@@ -4,8 +4,9 @@ import numpy as np
 formal_name = {
     "shrink-1": "weight-tok",
     "all": "joint",
-    "all_alternate": "alternating",
-    "all_alternate-Qvlstm": "alternating-Q",
+    "all_alternate": "alt",
+    "all_alternate-Qvlstm": "alt-Q",
+    "two_stage": "2stg"
 }
 
 
