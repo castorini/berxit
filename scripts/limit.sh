@@ -50,12 +50,15 @@ do
     --num_train_epochs $EPOCHS \
     --overwrite_output_dir \
     --seed $SEED \
-    --output_dir ./saved_models/${MODEL_TYPE}-${MODEL_SIZE}/$DATASET/${ROUTINE}-${SEED} \
+    --output_dir ./saved_models/${MODEL_TYPE}-${MODEL_SIZE}/$DATASET/limit-${SEED} \
     --plot_data_dir ./plotting/ \
     --save_steps 0 \
     --overwrite_cache \
     --train_routine limit \
     --log_id $SLURM_JOB_ID \
     --limit_layer $LIMIT
-  exit 0
 done
+
+python plotting/collect_limit.py \
+  ./plotting/saved_models/${MODEL_TYPE}-${MODEL_SIZE}/$DATASET/limit-${SEED} \
+  ${MODEL_SIZE}

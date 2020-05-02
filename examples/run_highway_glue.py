@@ -768,6 +768,17 @@ def main(args):
             note
         )
 
+    if args.train_routine == 'limit':
+        finished_layers = os.listdir(args.plot_data_dir + args.output_dir)
+        for fname in finished_layers:
+            layer = fname[len('layer-'):fname.index('.npy')]
+            try:
+                if layer == args.limit_layer:  # both are type'str'
+                    # already done
+                    exit(0)
+            except ValueError:
+                pass
+
     if os.path.exists(args.output_dir) and os.listdir(
             args.output_dir) and args.do_train and not args.overwrite_output_dir:
         raise ValueError(
