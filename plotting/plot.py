@@ -27,8 +27,8 @@ colors = {
 
 datasets = ["RTE", "MRPC", "SST-2", "QNLI", "QQP", "MNLI"]
 sizes = ["2.5k", "3.5k", "67k", "108k", "363k", "392k"]
-routines = ["all_alternate", "all_alternate-Qvlstm"]
-# routines = ["two_stage", "all", "all_alternate", "limit"]
+# routines = ["all_alternate", "all_alternate-Qvlstm"]
+routines = ["two_stage", "all", "all_alternate", "limit", "all_alternate-Qvlstm"]
 
 columns = 3  # 3 for landscape, 2 for portrait
 M, N = len(datasets)//columns, columns
@@ -37,7 +37,6 @@ axes.reshape([-1])
 
 
 def plot_acc_by_layer(axis, data):
-    xrange = range(1, 1+data.size)
     axis.set_xlim(1, data.size)
 
     if data.routine.endswith('Qvlstm'):
@@ -46,7 +45,8 @@ def plot_acc_by_layer(axis, data):
                   linewidth=1, markersize=2, label=data.formal_routine)
     else:
         # layer-wise acc
-        axis.plot(xrange, data.layer_acc, 'o-', color=colors[data.formal_routine],
+        axis.plot(range(1, 1+len(data.layer_acc)), data.layer_acc,
+                  'o-', color=colors[data.formal_routine],
                   label=data.formal_routine, linewidth=1, markersize=2)
         # entropy-based acc
         axis.plot(*data.etp_acc, 'o-.', color=colors[data.formal_routine],
