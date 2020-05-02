@@ -64,7 +64,7 @@ class Data:
                     'mean_exit': self.get_mean_exit(np_data[0]),
                     'acc': np_data[3],
                 }])
-        col.sort(key=lambda x: x[0])
+        col.sort(key=lambda x: x[1]['mean_exit'])
         return col
 
     def get_layer_acc(self):
