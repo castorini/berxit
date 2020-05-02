@@ -3,7 +3,7 @@
 #SBATCH -N 1
 #SBATCH -n 1
 #SBATCH --gres=gpu:1
-#SBATCH -p p100
+#SBATCH -p t4
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=24GB
 #SBATCH --output=logs/%j.slurm_out
@@ -25,10 +25,11 @@ then
   MODEL_NAME=${MODEL_NAME}-uncased
 fi
 
-LAYERS=24
-if [ $MODEL_SIZE = 'base' ]
+LAYERS=12
+if [ $MODEL_SIZE = 'large' ]
 then
-  LAYERS=12
+  echo 'REMEMBER TO CHANGE PARTITION INTO T4!'
+  LAYERS=24
 fi
 
 echo ${MODEL_TYPE}-${MODEL_SIZE}/$DATASET

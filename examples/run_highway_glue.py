@@ -975,7 +975,8 @@ def main(args):
             print("result: {}".format(print_result))
             experiment.log_metric("final result", print_result)
             if args.train_routine=='limit':
-                save_fname = args.plot_data_dir + f"/layer-{args.limit_layer}.npy"
+                save_fname = args.plot_data_dir + \
+                             args.output_dir + f"/layer-{args.limit_layer}.npy"
                 if not os.path.exists(os.path.dirname(save_fname)):
                     os.makedirs(os.path.dirname(save_fname))
                 np.save(save_fname, np.array([print_result]))
