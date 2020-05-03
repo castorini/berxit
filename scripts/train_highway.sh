@@ -17,8 +17,6 @@ MODEL_SIZE=${2}  # change partition to t4 if large
 DATASET=${3}
 SEED=42
 ROUTINE=${4}
-ALPHA=0.018  # for Q module
-BETA=0.5  # for Q module
 
 MODEL_NAME=${MODEL_TYPE}-${MODEL_SIZE}
 EPOCHS=10
@@ -28,8 +26,15 @@ then
   MODEL_NAME=${MODEL_NAME}-uncased
 fi
 
+LR=2e-5
+if [[ $ROUTINE = *lte ]]
+then
+  EPOCHS=1
+  LR=2e-4
+fi
 
-echo ${MODEL_TYPE}-${MODEL_SIZE}/$DATASET
+
+echo ${MODEL_TYPE}-${MODEL_SIZE}/$DATASET $ROUTINE
 python -um examples.run_highway_glue \
   --model_type $MODEL_TYPE \
   --model_name_or_path $MODEL_NAME \
@@ -41,7 +46,7 @@ python -um examples.run_highway_glue \
   --max_seq_length 128 \
   --per_gpu_eval_batch_size=1 \
   --per_gpu_train_batch_size=8 \
-  --learning_rate 2e-5 \
+  --learning_rate $LR \
   --num_train_epochs $EPOCHS \
   --overwrite_output_dir \
   --seed $SEED \
@@ -50,6 +55,4 @@ python -um examples.run_highway_glue \
   --save_steps 0 \
   --overwrite_cache \
   --train_routine $ROUTINE \
-  --log_id $SLURM_JOB_ID \
-  --alpha $ALPHA \
-  --beta $BETA
+  --log_id $SLURM_JOB_ID

@@ -76,6 +76,18 @@ class BertEncoder(nn.Module):
     def enable_lte(self, args):
         if args.lte_th is not None:
             self.lte_th = args.lte_th
+        # self.lte_th = [
+        #     0.6,
+        #     0.4,
+        #     0.4,
+        # ] + [0.1] * 9  # bert-base
+        self.lte_th = [
+            0.5,
+            0.45,
+            0.3,
+            0.3,
+            0.5,
+        ] + [0.1] * 19  # bert-large
 
         self.num_labels = 2
         if args.task_name in ['sts-b']:
@@ -151,7 +163,7 @@ class BertEncoder(nn.Module):
                     if (
                             (i+1 < self.num_layers)
                         and (
-                                (self.use_lte and lte_output>self.lte_th)
+                                (self.use_lte and lte_output < self.lte_th[i])
                              or (not self.use_lte and highway_entropy < self.early_exit_entropy[i])
                             )
                     ):
@@ -160,6 +172,7 @@ class BertEncoder(nn.Module):
                         raise HighwayException(new_output, i+1)
             else:
                 all_highway_exits = all_highway_exits + (highway_exit,)
+        # print(lte_outputs)
 
         # Add last layer
         if self.output_hidden_states:
@@ -498,18 +511,12 @@ class BertForSequenceClassification(BertPreTrainedModel):
 
             # loss (first entry of outputs) is no longer one variable, but a list of them
             if train_strategy.endswith("-lte"):
-                lte_loss_fct = MultiLabelSoftMarginLoss()
+                lte_loss_fct = MSELoss()
                 layer_acc = []
                 exit_pred = []
-                stay_prob = torch.ones([batch_size]).to(device)
                 for i in range(self.num_layers):
                     # prediction
-                    if i+1 == self.num_layers:
-                        exit_pred.append(stay_prob)
-                    else:
-                        lte_output = outputs[-1]['lte'][i]  # the probability to exit here
-                        exit_pred.append(stay_prob * lte_output)
-                        stay_prob = stay_prob * (1 - lte_output)
+                    exit_pred.append(outputs[-1]['lte'][i])
 
                     # label
                     if i+1 == self.num_layers:
@@ -529,10 +536,11 @@ class BertForSequenceClassification(BertPreTrainedModel):
                         ).long()  # 0 for wrong/continue, 1 for right/exit
                         correctness_loss = 0.99 - lte_gold.float()*0.98
                         # soft labels: 1->0.01, 0->0.99
-                    layer_acc.append(-correctness_loss)
-                exit_pred = torch.stack(exit_pred).transpose(0, 1)
-                exit_label = torch.stack(layer_acc).detach().transpose(0, 1)
-                outputs = ([lte_loss_fct(exit_pred, exit_label)],) + outputs
+                    layer_acc.append(correctness_loss)
+                exit_pred = torch.stack(exit_pred)#.transpose(0, 1)
+                exit_label = torch.stack(layer_acc).detach()#.transpose(0, 1)
+                norm_exit_label = 1 - torch.exp(-exit_label)  # map it to [0,1]
+                outputs = ([lte_loss_fct(exit_pred, norm_exit_label)],) + outputs
             elif train_strategy == 'raw':
                 outputs = ([loss],) + outputs
             elif train_strategy.startswith("limit"):

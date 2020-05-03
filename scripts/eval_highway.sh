@@ -19,9 +19,10 @@ SEED=42
 ROUTINE=${4}
 
 ENTROPY=0.1
+LTE_TH=0.0
 
 
-echo ${MODEL_TYPE}-${MODEL_SIZE}/$DATASET
+echo ${MODEL_TYPE}-${MODEL_SIZE}/$DATASET $ROUTINE
 python -um examples.run_highway_glue \
   --model_type $MODEL_TYPE \
   --model_name_or_path ./saved_models/${MODEL_TYPE}-${MODEL_SIZE}/$DATASET/${ROUTINE}-${SEED} \
@@ -38,4 +39,5 @@ python -um examples.run_highway_glue \
   --overwrite_cache \
   --per_gpu_eval_batch_size=1 \
   --train_routine $ROUTINE \
+  --lte_th $LTE_TH \
   --log_id $SLURM_JOB_ID
