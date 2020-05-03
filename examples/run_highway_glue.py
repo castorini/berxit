@@ -140,17 +140,17 @@ def get_args():
     parser.add_argument("--early_exit_entropy", default=-1, type=float,
                         help="Entropy threshold for early exit.")
     parser.add_argument("--alpha", default=None, type=float,
-                        help="Hyperparameter for Qmodule.")
+                        help="Hyperparameter for lte.")
     parser.add_argument("--beta", default=None, type=float,
-                        help="Hyperparameter for Qmodule.")
+                        help="Hyperparameter for lte.")
     parser.add_argument("--gamma", default=None, type=float,
-                        help="Hyperparameter for Qmodule.")
+                        help="Hyperparameter for lte.")
     parser.add_argument("--limit_layer", default="-1", type=str, required=False,
                         help="The layer for limit training.")
     parser.add_argument("--train_routine",
                         choices=['raw', 'two_stage', 'all', 'self_distil',
                                  'all_alternate', 'limit', 'layer_wise',
-                                 'all_alternate-Qvlstm'],
+                                 'all_alternate-lte'],
                         default='raw', type=str,
                         help="Training routine (a routine can have mutliple stages, each with different strategies.")
 
@@ -278,13 +278,13 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
 
     # Prepare optimizer and schedule (linear warmup and decay)
     no_decay = ['bias', 'LayerNorm.weight']
-    if train_strategy.endswith('-Qvlstm'):
+    if train_strategy.endswith('-lte'):
         optimizer_grouped_parameters = [
             {'params': [p for n, p in model.named_parameters() if
-                        ("Qmodule" in n) and (not any(nd in n for nd in no_decay))],
+                        ("lte" in n) and (not any(nd in n for nd in no_decay))],
              'weight_decay': args.weight_decay},
             {'params': [p for n, p in model.named_parameters() if
-                        ("Qmodule" in n) and (any(nd in n for nd in no_decay))],
+                        ("lte" in n) and (any(nd in n for nd in no_decay))],
              'weight_decay': 0.0}
         ]
     elif train_strategy == 'raw':
@@ -606,16 +606,16 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
             full_cost = len(eval_dataloader) * model.num_layers
             print("Expected saving", actual_cost / full_cost)
 
-            if model.core.encoder.use_Qmodule:
-                Qmodule_save_fname = args.plot_data_dir + \
+            if model.core.encoder.use_lte:
+                lte_save_fname = args.plot_data_dir + \
                                    args.output_dir + \
-                                   "/vlstm.npy"
-                if not os.path.exists(os.path.dirname(Qmodule_save_fname)):
-                    os.makedirs(os.path.dirname(Qmodule_save_fname))
-                if not os.path.exists(Qmodule_save_fname):
+                                   "/lte.npy"
+                if not os.path.exists(os.path.dirname(lte_save_fname)):
+                    os.makedirs(os.path.dirname(lte_save_fname))
+                if not os.path.exists(lte_save_fname):
                     prev_saver = []
                 else:
-                    prev_saver = np.load(Qmodule_save_fname, allow_pickle=True).tolist()
+                    prev_saver = np.load(lte_save_fname, allow_pickle=True).tolist()
 
                 print_result = get_wanted_result(result)
                 prev_saver.append([
@@ -626,7 +626,7 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
                     {'alpha': model.core.encoder.alpha,
                      'beta':  model.core.encoder.beta}
                 ])
-                np.save(Qmodule_save_fname, np.array(prev_saver))
+                np.save(lte_save_fname, np.array(prev_saver))
                 if profiling:
                     with open(args.plot_data_dir + args.output_dir + "/profile.txt", 'w') as fout:
                         print(prof.key_averages().table(sort_by="cuda_time_total"), file=fout)
@@ -850,12 +850,12 @@ def main(args):
 
     model.core.encoder.set_early_exit_entropy(args.early_exit_entropy)
     model.core.init_highway_pooler()
-    if args.train_routine.endswith("Qvlstm"):
-        non_Qmodule_output_dir = args.output_dir.replace('-Qvlstm', '')
-        tokenizer = tokenizer_class.from_pretrained(non_Qmodule_output_dir,
+    if args.train_routine.endswith("lte"):
+        original_output_dir = args.output_dir.replace('-lte', '')
+        tokenizer = tokenizer_class.from_pretrained(original_output_dir,
                                                     do_lower_case=args.do_lower_case)
-        model = model_class.from_pretrained(non_Qmodule_output_dir)
-        model.core.encoder.enable_Qmodule(args)
+        model = model_class.from_pretrained(original_output_dir)
+        model.core.encoder.enable_lte(args)
         model.to(args.device)
 
 
@@ -912,7 +912,7 @@ def main(args):
                                          train_strategy=args.train_routine)
             logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
-        elif args.train_routine.endswith("-Qvlstm"):
+        elif args.train_routine.endswith("-lte"):
 
             train(args, train_dataset, model, tokenizer,
                   train_strategy=args.train_routine)
@@ -960,9 +960,9 @@ def main(args):
             model = model_class.from_pretrained(checkpoint)
             model.core.encoder.set_early_exit_entropy(args.early_exit_entropy)
             model.to(args.device)
-            if args.train_routine.endswith('-Qvlstm'):
-                model.core.encoder.enable_Qmodule(args)
-                experiment.log_other(
+            if args.train_routine.endswith('-lte'):
+                model.core.encoder.enable_lte(args)
+                experiment.log_other(  # TODO: change!
                     'note',
                     'al={} be={} ga={}'.format(
                         model.core.encoder.alpha,

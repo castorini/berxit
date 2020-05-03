@@ -65,24 +65,20 @@ class BertEncoder(nn.Module):
 
         self.early_exit_entropy = [-1 for _ in range(config.num_hidden_layers)]
 
-        self.use_Qmodule = False
-        self.init_Qmodule()
+        self.use_lte = False
+        self.init_lte()
 
-    def init_Qmodule(self):
+    def init_lte(self):
         # hyperparameters for balancing loss
         self.alpha = 0.01
         self.beta = 0.6
         self.gamma = 1.0
 
-        # Qmodule itself
-        self.Qmodule_size = 10
-        self.Qmodule_classifier = nn.Linear(self.Qmodule_size + 4, 2)
-        # +4: 3 for logits, 1 for entropy (0 padding for regression tasks)
-        self.Qmodule_activation = nn.Tanh()
+        # lte module itself
+        self.lte_classifier = nn.Linear(self.hidden_size, 2)
+        self.lte_activation = nn.Tanh()
 
-        self.pool_1d = torch.nn.AdaptiveAvgPool1d(self.Qmodule_size)
-
-    def enable_Qmodule(self, args):
+    def enable_lte(self, args):
         if args.alpha is not None:
             self.alpha = args.alpha
         if args.beta is not None:
@@ -96,8 +92,8 @@ class BertEncoder(nn.Module):
         elif args.task_name in ['mnli']:
             self.num_labels = 3
 
-        self.use_Qmodule = True
-        print(f'Qmodule initialized')
+        self.use_lte = True
+        print(f'lte initialized')
 
     def set_early_exit_entropy(self, x):
         if (type(x) is float) or (type(x) is int):
@@ -118,19 +114,10 @@ class BertEncoder(nn.Module):
         all_attentions = ()
         all_highway_exits = ()
 
-        Qmodule_outputs = []
-        Qmodule_classifier_outputs = []
+        lte_outputs = []
 
-        batch_size = hidden_states.shape[0]
-        device = hidden_states.device
-
-        if self.use_Qmodule:
-            if self.num_labels == 2:
-                zeros = torch.tensor(
-                    [[0.0] for _ in range(batch_size)]).to(device)
-            elif self.num_labels == 1:
-                zeros = torch.tensor(
-                    [[0.0, 0.0, 0.0] for _ in range(batch_size)]).to(device)
+        # batch_size = hidden_states.shape[0]
+        # device = hidden_states.device
 
         for i, layer_module in enumerate(self.layer):
             if self.output_hidden_states:
@@ -155,35 +142,14 @@ class BertEncoder(nn.Module):
 
             highway_entropy = entropy(highway_exit[0])
 
-            # the block for Qmodule
-            if self.use_Qmodule:
-                with torch.autograd.profiler.record_function('qmodule'):
-                    pooling_out = self.pool_1d(highway_exit[1].unsqueeze(0)).squeeze(0)
-                    if self.num_labels==3:
-                        Qmodule_classifier_input = torch.cat([
-                            pooling_out,
-                            highway_exit[0],
-                            highway_entropy.unsqueeze(1)
-                        ], dim=1)
-                    elif self.num_labels==2:
-                        # add extra zero-vector for shape consistence
-                        Qmodule_classifier_input = torch.cat([
-                            pooling_out,
-                            highway_exit[0],
-                            highway_entropy.unsqueeze(1),
-                            zeros
-                        ], dim=1)
-                    elif self.num_labels==1:
-                        # add extra zero-vector for shape consistence
-                        Qmodule_classifier_input = torch.cat([
-                            pooling_out,
-                            highway_exit[0],
-                            zeros
-                        ], dim=1)
-                    Qmodule_classifier_output = self.Qmodule_activation(
-                        self.Qmodule_classifier(Qmodule_classifier_input)
+            # the block for lte
+            if self.use_lte:
+                with torch.autograd.profiler.record_function('lte'):
+                    lte_input = highway_exit[1]  # hidden states
+                    lte_output = self.lte_activation(
+                        self.lte_classifier(lte_input)
                     )
-                    Qmodule_classifier_outputs.append(Qmodule_classifier_output)
+                    lte_outputs.append(lte_output)
 
             if not self.training:
                 with torch.autograd.profiler.record_function('earlyexit'):
@@ -194,8 +160,8 @@ class BertEncoder(nn.Module):
                     if (
                             (i+1 < self.num_layers)
                         and (
-                                (self.use_Qmodule and torch.argmax(Qmodule_classifier_output)==1)
-                             or (not self.use_Qmodule and highway_entropy < self.early_exit_entropy[i])
+                                (self.use_lte and torch.argmax(lte_output)==1)
+                             or (not self.use_lte and highway_entropy < self.early_exit_entropy[i])
                             )
                     ):
                         new_output = (highway_exit[0],) + current_outputs[1:] + \
@@ -215,8 +181,8 @@ class BertEncoder(nn.Module):
             outputs = outputs + (all_attentions,)
 
         outputs = outputs + ({"highway": all_highway_exits},)
-        if self.use_Qmodule:
-            outputs[-1]["qmodule"] = (Qmodule_outputs, Qmodule_classifier_outputs)
+        if self.use_lte:
+            outputs[-1]["lte"] = lte_outputs
 
         return outputs  # last-layer hidden state, (all hidden states), (all attentions), all highway exits
 
@@ -541,9 +507,8 @@ class BertForSequenceClassification(BertPreTrainedModel):
 
             # loss (first entry of outputs), is no longer one variable, but a list of them
 
-            if train_strategy.endswith("-Qvlstm"):
-                Qmodule_loss = 0
-                ongoing = torch.ones([batch_size, 1]).to(device)
+            if train_strategy.endswith("-lte"):
+                lte_loss = 0
                 for i in range(self.num_layers-1):
                     if self.num_labels==1:
                         correctness_loss = torch.pow(
@@ -551,28 +516,26 @@ class BertForSequenceClassification(BertPreTrainedModel):
                             2
                         )
                     else:
-                        Qmodule_gold = torch.eq(
+                        lte_gold = torch.eq(
                             torch.argmax(outputs[-1]['highway'][i][0], dim=1),
                             labels
                         ).long()  # 0 for wrong/continue, 1 for right/exit
-                        correctness_loss = 0.99 - Qmodule_gold.float()*0.98
+                        correctness_loss = 0.99 - lte_gold.float()*0.98
                         # soft labels: 1->0.01, 0->0.99
-                    Q_this = outputs[-1]['qmodule'][1][i]  # Q_i
+                    Q_this = outputs[-1]['lte'][1][i]  # Q_i
                     a_0_reward = torch.tensor([-self.bert.encoder.alpha]).to(device)  # reward for continue
                     r_this = torch.stack([
                         a_0_reward.repeat(batch_size),
                         - self.bert.encoder.beta * correctness_loss
                     ], dim=1)
-                    # r_this = r_this * ongoing  # only ongoing samples have reward
-                    ongoing = ongoing * torch.eq(torch.argmax(Q_this, dim=1), 0).unsqueeze(1)
                     if i == self.num_layers-2:
-                        Qmodule_loss += torch.mean(
+                        lte_loss += torch.mean(
                             (r_this - Q_this) ** 2
                         )
                     else:
-                        Q_next = outputs[-1]['qmodule'][1][i+1]  # Q_{i+1}
+                        Q_next = outputs[-1]['lte'][1][i+1]  # Q_{i+1}
                         Q_next = torch.max(Q_next, dim=1)[0].repeat(2, 1).t()
-                        Qmodule_loss += torch.mean(
+                        lte_loss += torch.mean(
                             (r_this + self.bert.encoder.gamma*Q_next - Q_this) ** 2
                         )
                 #     breakpoint_flag = step_num==300
@@ -582,7 +545,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 #         print(r_this)
                 # if breakpoint_flag:
                 #     breakpoint()
-                outputs = ([Qmodule_loss],) + outputs
+                outputs = ([lte_loss],) + outputs
             elif train_strategy == 'raw':
                 outputs = ([loss],) + outputs
             elif train_strategy.startswith("limit"):
