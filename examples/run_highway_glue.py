@@ -139,11 +139,7 @@ def get_args():
                         help="Linear warmup over warmup_steps.")
     parser.add_argument("--early_exit_entropy", default=-1, type=float,
                         help="Entropy threshold for early exit.")
-    parser.add_argument("--alpha", default=None, type=float,
-                        help="Hyperparameter for lte.")
-    parser.add_argument("--beta", default=None, type=float,
-                        help="Hyperparameter for lte.")
-    parser.add_argument("--gamma", default=None, type=float,
+    parser.add_argument("--lte_th", default=None, type=float,
                         help="Hyperparameter for lte.")
     parser.add_argument("--limit_layer", default="-1", type=str, required=False,
                         help="The layer for limit training.")
@@ -623,8 +619,7 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
                     eval_time,
                     actual_cost / full_cost,
                     print_result,
-                    {'alpha': model.core.encoder.alpha,
-                     'beta':  model.core.encoder.beta}
+                    {'lte_th': model.core.encoder.lte_th}
                 ])
                 np.save(lte_save_fname, np.array(prev_saver))
                 if profiling:
@@ -962,14 +957,14 @@ def main(args):
             model.to(args.device)
             if args.train_routine.endswith('-lte'):
                 model.core.encoder.enable_lte(args)
-                experiment.log_other(  # TODO: change!
-                    'note',
-                    'al={} be={} ga={}'.format(
-                        model.core.encoder.alpha,
-                        model.core.encoder.beta,
-                        model.core.encoder.gamma
-                    )
-                )
+                # experiment.log_other(  # TODO: change!
+                #     'note',
+                #     'al={} be={} ga={}'.format(
+                #         model.core.encoder.alpha,
+                #         model.core.encoder.beta,
+                #         model.core.encoder.gamma
+                #     )
+                # )
                 args.eval_highway = True  # triggers ERS measurement
 
             result = evaluate(args, model, tokenizer, prefix=prefix,

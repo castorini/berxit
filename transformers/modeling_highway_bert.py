@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 from torch import nn
-from torch.nn import CrossEntropyLoss, MSELoss
+from torch.nn import CrossEntropyLoss, MSELoss, MultiLabelSoftMarginLoss
 import torch.nn.functional as F
 from .modeling_bert import BertLayer, BertLayerNorm, BertPreTrainedModel
 
@@ -69,22 +69,13 @@ class BertEncoder(nn.Module):
         self.init_lte()
 
     def init_lte(self):
-        # hyperparameters for balancing loss
-        self.alpha = 0.01
-        self.beta = 0.6
-        self.gamma = 1.0
-
-        # lte module itself
-        self.lte_classifier = nn.Linear(self.hidden_size, 2)
-        self.lte_activation = nn.Tanh()
+        self.lte_th = 0.005
+        self.lte_classifier = nn.Linear(self.hidden_size, 1)
+        self.lte_activation = nn.Sigmoid()
 
     def enable_lte(self, args):
-        if args.alpha is not None:
-            self.alpha = args.alpha
-        if args.beta is not None:
-            self.beta = args.beta
-        if args.gamma is not None:
-            self.gamma = args.gamma
+        if args.lte_th is not None:
+            self.lte_th = args.lte_th
 
         self.num_labels = 2
         if args.task_name in ['sts-b']:
@@ -93,7 +84,7 @@ class BertEncoder(nn.Module):
             self.num_labels = 3
 
         self.use_lte = True
-        print(f'lte initialized')
+        print(f'lte enabled, th={self.lte_th}')
 
     def set_early_exit_entropy(self, x):
         if (type(x) is float) or (type(x) is int):
@@ -148,7 +139,7 @@ class BertEncoder(nn.Module):
                     lte_input = highway_exit[1]  # hidden states
                     lte_output = self.lte_activation(
                         self.lte_classifier(lte_input)
-                    )
+                    ).squeeze()
                     lte_outputs.append(lte_output)
 
             if not self.training:
@@ -160,7 +151,7 @@ class BertEncoder(nn.Module):
                     if (
                             (i+1 < self.num_layers)
                         and (
-                                (self.use_lte and torch.argmax(lte_output)==1)
+                                (self.use_lte and lte_output>self.lte_th)
                              or (not self.use_lte and highway_entropy < self.early_exit_entropy[i])
                             )
                     ):
@@ -505,47 +496,43 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 highway_losses.append(highway_loss)
                 # raw_highway_losses.append(raw_highway_loss)
 
-            # loss (first entry of outputs), is no longer one variable, but a list of them
-
+            # loss (first entry of outputs) is no longer one variable, but a list of them
             if train_strategy.endswith("-lte"):
-                lte_loss = 0
-                for i in range(self.num_layers-1):
-                    if self.num_labels==1:
+                lte_loss_fct = MultiLabelSoftMarginLoss()
+                layer_acc = []
+                exit_pred = []
+                stay_prob = torch.ones([batch_size]).to(device)
+                for i in range(self.num_layers):
+                    # prediction
+                    if i+1 == self.num_layers:
+                        exit_pred.append(stay_prob)
+                    else:
+                        lte_output = outputs[-1]['lte'][i]  # the probability to exit here
+                        exit_pred.append(stay_prob * lte_output)
+                        stay_prob = stay_prob * (1 - lte_output)
+
+                    # label
+                    if i+1 == self.num_layers:
+                        layer_output = logits
+                    else:
+                        layer_output = outputs[-1]['highway'][i][0]
+                    if self.num_labels == 1:
                         correctness_loss = torch.pow(
-                            outputs[-1]['highway'][i][0].squeeze() - labels,
+                            layer_output.squeeze() - labels,
                             2
                         )
                     else:
+                        # TODO: optimize for classification
                         lte_gold = torch.eq(
-                            torch.argmax(outputs[-1]['highway'][i][0], dim=1),
+                            torch.argmax(layer_output, dim=1),
                             labels
                         ).long()  # 0 for wrong/continue, 1 for right/exit
                         correctness_loss = 0.99 - lte_gold.float()*0.98
                         # soft labels: 1->0.01, 0->0.99
-                    Q_this = outputs[-1]['lte'][1][i]  # Q_i
-                    a_0_reward = torch.tensor([-self.bert.encoder.alpha]).to(device)  # reward for continue
-                    r_this = torch.stack([
-                        a_0_reward.repeat(batch_size),
-                        - self.bert.encoder.beta * correctness_loss
-                    ], dim=1)
-                    if i == self.num_layers-2:
-                        lte_loss += torch.mean(
-                            (r_this - Q_this) ** 2
-                        )
-                    else:
-                        Q_next = outputs[-1]['lte'][1][i+1]  # Q_{i+1}
-                        Q_next = torch.max(Q_next, dim=1)[0].repeat(2, 1).t()
-                        lte_loss += torch.mean(
-                            (r_this + self.bert.encoder.gamma*Q_next - Q_this) ** 2
-                        )
-                #     breakpoint_flag = step_num==300
-                #     if breakpoint_flag:
-                #         print(i)
-                #         print(Q_this)
-                #         print(r_this)
-                # if breakpoint_flag:
-                #     breakpoint()
-                outputs = ([lte_loss],) + outputs
+                    layer_acc.append(-correctness_loss)
+                exit_pred = torch.stack(exit_pred).transpose(0, 1)
+                exit_label = torch.stack(layer_acc).detach().transpose(0, 1)
+                outputs = ([lte_loss_fct(exit_pred, exit_label)],) + outputs
             elif train_strategy == 'raw':
                 outputs = ([loss],) + outputs
             elif train_strategy.startswith("limit"):
