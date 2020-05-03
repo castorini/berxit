@@ -149,7 +149,7 @@ def get_args():
                         help="The layer for limit training.")
     parser.add_argument("--train_routine",
                         choices=['raw', 'two_stage', 'all', 'self_distil',
-                                 'all_alternate', 'limit', 'layer_wise'
+                                 'all_alternate', 'limit', 'layer_wise',
                                  'all_alternate-Qvlstm'],
                         default='raw', type=str,
                         help="Training routine (a routine can have mutliple stages, each with different strategies.")
@@ -396,13 +396,14 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
         os.makedirs(args.output_dir)
     fout = open(args.output_dir + "/layer_example_counter", 'w')
 
-    print_loss_switch = False  # only True for debugging
+    print_loss_switch = True  # only True for debugging
     tqdm_disable = print_loss_switch or (args.local_rank not in [-1, 0])
 
     for epoch_num in train_iterator:
         epoch_iterator = tqdm(train_dataloader, desc="Iteration", disable=tqdm_disable)
         layer_example_counter = {i: 0 for i in range(model.num_layers + 1)}
         cumu_loss = 0.0
+        epoch_loss = 0.0
         for step, batch in enumerate(epoch_iterator):
             model.train()
             batch = tuple(t.to(args.device) for t in batch)
@@ -441,6 +442,7 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
                     print(cumu_loss/10)
                     cumu_loss = 0
                 cumu_loss += loss.item()
+                epoch_loss += loss.item()
                 if (step + 1) % args.gradient_accumulation_steps == 0:
                     if args.fp16:
                         torch.nn.utils.clip_grad_norm_(amp.master_params(optimizer), args.max_grad_norm)
@@ -485,6 +487,8 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
             if args.max_steps > 0 and global_step > args.max_steps:
                 epoch_iterator.close()
                 break
+
+        print('Epoch loss: ', epoch_loss)
 
         if args.max_steps > 0 and global_step > args.max_steps:
             train_iterator.close()
@@ -851,7 +855,7 @@ def main(args):
         tokenizer = tokenizer_class.from_pretrained(non_Qmodule_output_dir,
                                                     do_lower_case=args.do_lower_case)
         model = model_class.from_pretrained(non_Qmodule_output_dir)
-        model.core.encoder.enable_Qmodule(args, Q=args.train_routine.endswith('-Qvlstm'))
+        model.core.encoder.enable_Qmodule(args)
         model.to(args.device)
 
 
@@ -957,7 +961,7 @@ def main(args):
             model.core.encoder.set_early_exit_entropy(args.early_exit_entropy)
             model.to(args.device)
             if args.train_routine.endswith('-Qvlstm'):
-                model.core.encoder.enable_Qmodule(args, Q=True)
+                model.core.encoder.enable_Qmodule(args)
                 experiment.log_other(
                     'note',
                     'al={} be={} ga={}'.format(

@@ -100,7 +100,6 @@ class BertEncoder(nn.Module):
         print(f'Qmodule initialized')
 
     def set_early_exit_entropy(self, x):
-        print(x)
         if (type(x) is float) or (type(x) is int):
             for i in range(len(self.early_exit_entropy)):
                 self.early_exit_entropy[i] = x
@@ -164,7 +163,7 @@ class BertEncoder(nn.Module):
                         Qmodule_classifier_input = torch.cat([
                             pooling_out,
                             highway_exit[0],
-                            entropy(highway_exit[0]).unsqueeze(1)
+                            highway_entropy.unsqueeze(1)
                         ], dim=1)
                     elif self.num_labels==2:
                         # add extra zero-vector for shape consistence
@@ -559,13 +558,12 @@ class BertForSequenceClassification(BertPreTrainedModel):
                         correctness_loss = 0.99 - Qmodule_gold.float()*0.98
                         # soft labels: 1->0.01, 0->0.99
                     Q_this = outputs[-1]['qmodule'][1][i]  # Q_i
-                    a_0_reward = torch.tensor([-self.core.encoder.alpha]).to(device)  # reward for continue
+                    a_0_reward = torch.tensor([-self.bert.encoder.alpha]).to(device)  # reward for continue
                     r_this = torch.stack([
                         a_0_reward.repeat(batch_size),
-                        - self.core.encoder.beta * correctness_loss
-                        # - self.beta * raw_highway_losses[i].detach()
+                        - self.bert.encoder.beta * correctness_loss
                     ], dim=1)
-                    r_this = r_this * ongoing # only ongoing samples have reward
+                    # r_this = r_this * ongoing  # only ongoing samples have reward
                     ongoing = ongoing * torch.eq(torch.argmax(Q_this, dim=1), 0).unsqueeze(1)
                     if i == self.num_layers-2:
                         Qmodule_loss += torch.mean(
@@ -573,14 +571,15 @@ class BertForSequenceClassification(BertPreTrainedModel):
                         )
                     else:
                         Q_next = outputs[-1]['qmodule'][1][i+1]  # Q_{i+1}
-                        Q_next = torch.max(Q_next, dim=1)[0].repeat(2, 1).t()  # this 2 is bad
+                        Q_next = torch.max(Q_next, dim=1)[0].repeat(2, 1).t()
                         Qmodule_loss += torch.mean(
-                            (r_this + self.core.encoder.gamma*Q_next - Q_this) ** 2)
-                    # breakpoint_flag = (step_num>=100) and (step_num<=105) and (torch.sum(correctness_loss)>0.5)
-                    # if breakpoint_flag:
-                    #     print(i)
-                    #     print(Q_this)
-                    #     print(r_this)
+                            (r_this + self.bert.encoder.gamma*Q_next - Q_this) ** 2
+                        )
+                #     breakpoint_flag = step_num==300
+                #     if breakpoint_flag:
+                #         print(i)
+                #         print(Q_this)
+                #         print(r_this)
                 # if breakpoint_flag:
                 #     breakpoint()
                 outputs = ([Qmodule_loss],) + outputs
