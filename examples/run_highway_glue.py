@@ -139,8 +139,9 @@ def get_args():
                         help="Linear warmup over warmup_steps.")
     parser.add_argument("--early_exit_entropy", default=-1, type=float,
                         help="Entropy threshold for early exit.")
-    parser.add_argument("--lte_th", default=None, type=float,
-                        help="Hyperparameter for lte.")
+    parser.add_argument("--lte_th", default=None, type=str,
+                        help="Learning to exit threshold. Example:"
+                             "'0.2' or '0.3,4;0.2,8'")
     parser.add_argument("--limit_layer", default="-1", type=str, required=False,
                         help="The layer for limit training.")
     parser.add_argument("--train_routine",

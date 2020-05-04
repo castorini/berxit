@@ -69,25 +69,34 @@ class BertEncoder(nn.Module):
         self.init_lte()
 
     def init_lte(self):
-        self.lte_th = 0.005
+        self.lte_th = [0.005] * self.num_layers
         self.lte_classifier = nn.Linear(self.hidden_size, 1)
         self.lte_activation = nn.Sigmoid()
 
     def enable_lte(self, args):
         if args.lte_th is not None:
-            self.lte_th = args.lte_th
+            if ',' not in args.lte_th:
+                self.lte_th = [float(args.lte_th)] * self.num_layers
+            else:
+                groups = args.lte_th.split(';')
+                self.lte_th = []
+                for g in groups:
+                    val, rep = g.split(',')
+                    val, rep = float(val), int(rep)
+                    self.lte_th = self.lte_th + [val] * rep
+
         # self.lte_th = [
         #     0.6,
         #     0.4,
         #     0.4,
         # ] + [0.1] * 9  # bert-base
-        self.lte_th = [
-            0.5,
-            0.45,
-            0.3,
-            0.3,
-            0.5,
-        ] + [0.1] * 19  # bert-large
+        # self.lte_th = [
+        #     0.5,
+        #     0.45,
+        #     0.3,
+        #     0.3,
+        #     0.5,
+        # ] + [0.1] * 19  # bert-large
 
         self.num_labels = 2
         if args.task_name in ['sts-b']:
@@ -473,10 +482,9 @@ class BertForSequenceClassification(BertPreTrainedModel):
         batch_size = logits.shape[0]
         device = logits.device
 
-        if not self.training:
-            original_entropy = entropy(logits)
-            highway_entropy = []
-            highway_logits_all = []
+        original_entropy = entropy(logits)
+        highway_entropy = []
+        highway_all_logits = []
         if labels is not None:
             if layer_example_counter is not None:
                 layer_example_counter[0] += len(labels)
@@ -493,53 +501,53 @@ class BertForSequenceClassification(BertPreTrainedModel):
             highway_losses = []
             for i, highway_exit in enumerate(outputs[-1]["highway"]):
                 highway_logits = highway_exit[0]
-
-                if not self.training:
-                    highway_logits_all.append(highway_logits)
+                highway_all_logits.append(highway_logits)
+                if not self.train:
                     highway_entropy.append(highway_exit[2])
+
                 if self.num_labels == 1:
-                    #  We are doing regression
                     loss_fct = MSELoss()
                     highway_loss = loss_fct(highway_logits.view(-1),
                                             labels.view(-1))
                 else:
-                    loss_fct = CrossEntropyLoss(reduction='mean')
+                    loss_fct = CrossEntropyLoss()
                     highway_loss = loss_fct(highway_logits.view(-1, self.num_labels),
                                             labels.view(-1))
                 highway_losses.append(highway_loss)
-                # raw_highway_losses.append(raw_highway_loss)
 
             # loss (first entry of outputs) is no longer one variable, but a list of them
             if train_strategy.endswith("-lte"):
                 lte_loss_fct = MSELoss()
-                layer_acc = []
+                uncertainties = []
                 exit_pred = []
                 for i in range(self.num_layers):
-                    # prediction
-                    exit_pred.append(outputs[-1]['lte'][i])
+                    # exit prediction
+                    exit_pred.append(outputs[-1]['lte'][i])  # "uncertainty"
 
-                    # label
-                    if i+1 == self.num_layers:
-                        layer_output = logits
-                    else:
-                        layer_output = outputs[-1]['highway'][i][0]
+                    # exit label
                     if self.num_labels == 1:
-                        correctness_loss = torch.pow(
+                        if i + 1 == self.num_layers:
+                            layer_output = logits
+                        else:
+                            layer_output = outputs[-1]['highway'][i][0]
+                        layer_uncertainty = torch.pow(
                             layer_output.squeeze() - labels,
                             2
                         )
                     else:
-                        # TODO: optimize for classification
-                        lte_gold = torch.eq(
-                            torch.argmax(layer_output, dim=1),
-                            labels
-                        ).long()  # 0 for wrong/continue, 1 for right/exit
-                        correctness_loss = 0.99 - lte_gold.float()*0.98
-                        # soft labels: 1->0.01, 0->0.99
-                    layer_acc.append(correctness_loss)
-                exit_pred = torch.stack(exit_pred)#.transpose(0, 1)
-                exit_label = torch.stack(layer_acc).detach()#.transpose(0, 1)
-                norm_exit_label = 1 - torch.exp(-exit_label)  # map it to [0,1]
+                        if i+1 == self.num_layers:
+                            layer_uncertainty = entropy(logits)
+                        else:
+                            layer_uncertainty = entropy(highway_all_logits[i])
+                    uncertainties.append(layer_uncertainty)
+                exit_pred = torch.stack(exit_pred)
+                exit_label = torch.stack(uncertainties).detach()
+
+                # normalize exit label
+                if self.num_labels == 1:
+                    norm_exit_label = 1 - torch.exp(-exit_label)
+                else:
+                    norm_exit_label = torch.clamp(exit_label, min=0.05, max=0.95)
                 outputs = ([lte_loss_fct(exit_pred, norm_exit_label)],) + outputs
             elif train_strategy == 'raw':
                 outputs = ([loss],) + outputs
@@ -586,7 +594,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
             outputs = outputs + ((original_entropy, highway_entropy), exit_layer)
             if output_layer >= 0:
                 outputs = (outputs[0],) +\
-                          (highway_logits_all[output_layer],) +\
+                          (highway_all_logits[output_layer],) +\
                           outputs[2:]  ## use the highway of the last layer
 
         return outputs  # (loss), logits, (hidden_states), (attentions), (entropies), (exit_layer)
