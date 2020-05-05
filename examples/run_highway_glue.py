@@ -393,7 +393,7 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
         os.makedirs(args.output_dir)
     fout = open(args.output_dir + "/layer_example_counter", 'w')
 
-    print_loss_switch = True  # only True for debugging
+    print_loss_switch = False  # only True for debugging
     tqdm_disable = print_loss_switch or (args.local_rank not in [-1, 0])
 
     for epoch_num in train_iterator:

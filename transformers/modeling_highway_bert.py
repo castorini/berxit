@@ -181,7 +181,9 @@ class BertEncoder(nn.Module):
                         raise HighwayException(new_output, i+1)
             else:
                 all_highway_exits = all_highway_exits + (highway_exit,)
-        # print(lte_outputs)
+        # for i, lo in enumerate(lte_outputs):
+        #     print('{} {:.3f}'.format(i+1, lo), end='\t')
+        # print()
 
         # Add last layer
         if self.output_hidden_states:
