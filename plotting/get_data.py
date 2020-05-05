@@ -6,6 +6,7 @@ formal_name = {
     "all": "joint",
     "all_alternate": "alt",
     "all_alternate-Qvlstm": "alt-Q",
+    "all_alternate-lte": "alt-lte",
     "two_stage": "2stg"
 }
 
@@ -33,11 +34,11 @@ class Data:
         if routine in formal_name:
             self.formal_routine = formal_name[routine]
         self.filepath = f"saved_models/{self.model}/{self.dataset}/{self.routine}-42/"
-        if not routine.endswith('Qvlstm'):
+        if routine.endswith('lte'):
+            self.etp_data = self.get_lte_data()
+        else:
             self.layer_acc = self.get_layer_acc()
             self.etp_data = self.get_etp_data()
-        else:
-            self.etp_data = self.get_Qmodule_data()
         self.etp_acc = [[], []]  # x and y for plotting
         for etp, data in self.etp_data:
             self.etp_acc[0].append(data['mean_exit'])
@@ -75,8 +76,8 @@ class Data:
         else:
             return data
 
-    def get_Qmodule_data(self):
-        data = np_load(self.filepath + 'vlstm.npy')
+    def get_lte_data(self):
+        data = np_load(self.filepath + 'lte.npy')
         col = []
         for entry in data:
             col.append([entry[4], {

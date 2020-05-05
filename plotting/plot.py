@@ -8,6 +8,18 @@ from get_data import Data
 
 model = sys.argv[1]
 
+plot_target = 1
+plot_target_name = [
+    'routine_comp',
+    'layer_etp_acc_comp',
+    'layer_lte_acc_comp',
+]
+"""
+0: comparison between different training routines
+1: comparison between layer_acc and etp_acc
+2: comparison between layer_acc and lte
+"""
+
 formal_name = {
     "shrink-1": "weight-tok",
     "all": "joint",
@@ -20,40 +32,50 @@ colors = {
     "all": color_pool[1],
     "all_alternate": color_pool[2],
     "all_alternate-Qvlstm": color_pool[2],
+    "all_alternate-lte": color_pool[2],
     "limit": color_pool[5]
 }
 
-datasets = ["RTE", "MRPC", "SST-2", "QNLI", "QQP", "MNLI"]
-sizes = ["2.5k", "3.5k", "67k", "108k", "363k", "392k"]
-# routines = ["all_alternate", "all_alternate-Qvlstm"]
-routines = ["two_stage", "all", "all_alternate", "limit", "all_alternate-Qvlstm"]
+if plot_target in [0, 1]:
+    datasets = ["RTE", "MRPC", "SST-2", "QNLI", "QQP", "MNLI"]
+    sizes = ["2.5k", "3.5k", "67k", "108k", "363k", "392k"]
+    routines = ["two_stage", "all", "all_alternate", "limit"]
+    if plot_target == 1:
+        routines = ["all_alternate", "limit"]
+    columns = 2
+elif plot_target == 2:
+    datasets = ['STS-B', 'SST-2']
+    sizes = ['5.7k', '67k']
+    routines = ["all_alternate", "all_alternate-lte"]
+    columns = 2
 
-columns = 3  # 3 for landscape, 2 for portrait
 M, N = len(datasets)//columns, columns
 fig, axes = plt.subplots(M, N, figsize=[N*4, M*4])
-axes.reshape([-1])
+axes = axes.reshape([-1])
 
 
 def plot_acc_by_layer(axis, data):
     axis.set_xlim(1, data.size)
 
-    if data.routine.endswith('Qvlstm'):
-        # Qmodule acc
+    if data.routine.endswith('lte'):
+        # lte acc
         axis.plot(*data.etp_acc, 'o:', color=colors[data.routine],
                   linewidth=1, markersize=2, label=data.formal_routine)
     else:
         # layer-wise acc
-        # axis.plot(range(1, 1+len(data.layer_acc)), data.layer_acc,
-        #           'o-', color=colors[data.routine],
-        #           label=data.formal_routine, linewidth=1, markersize=2)
+        axis.plot(range(1, 1+len(data.layer_acc)), data.layer_acc,
+                  'o-', color=colors[data.routine],
+                  label=data.formal_routine, linewidth=1, markersize=2)
+
         # entropy-based acc
-        axis.plot(*data.etp_acc, 'o-.', color=colors[data.routine],
-                  label=data.formal_routine,
-                  linewidth=1, markersize=2)
+        if plot_target == 1 and data.routine != 'limit':
+            axis.plot(*data.etp_acc, 'o-.', color=colors[data.routine],
+                      label=data.formal_routine + "-etp",
+                      linewidth=1, markersize=2)
 
 
 for i_dataset, dataset in enumerate(datasets):
-    dataset_axis = axes[i_dataset // columns][i_dataset % columns]
+    dataset_axis = axes[i_dataset]
     for i_routine, routine in enumerate(routines):
         try:
             data_obj = Data(model, dataset, routine)
@@ -73,5 +95,5 @@ for i_dataset, dataset in enumerate(datasets):
 
 
 plt.tight_layout()
-# plt.show()
-plt.savefig(f"{model}.pdf")
+plt.show()
+# plt.savefig(f"{model}-{plot_target_name[plot_target]}.pdf")
