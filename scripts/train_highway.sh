@@ -3,7 +3,7 @@
 #SBATCH -N 1
 #SBATCH -n 1
 #SBATCH --gres=gpu:1
-#SBATCH -p p100
+#SBATCH -p t4
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=24GB
 #SBATCH --output=logs/%j.slurm_out
@@ -24,6 +24,11 @@ if [ $MODEL_TYPE = 'bert' ]
 then
   EPOCHS=3
   MODEL_NAME=${MODEL_NAME}-uncased
+fi
+if [ $MODEL_TYPE = 'albert' ]
+then
+  EPOCHS=3
+  MODEL_NAME=${MODEL_NAME}-v2
 fi
 
 LR=2e-5

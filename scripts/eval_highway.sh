@@ -18,7 +18,6 @@ DATASET=${3}
 SEED=42
 ROUTINE=${4}
 
-ENTROPY=0.1
 LTE_TH=0 #"0.1,14;0.15,10"
 
 
@@ -34,7 +33,6 @@ python -um examples.run_highway_glue \
   --max_seq_length 128 \
   --seed $SEED \
   --eval_each_highway \
-  --early_exit_entropy $ENTROPY \
   --eval_highway \
   --overwrite_cache \
   --per_gpu_eval_batch_size=1 \

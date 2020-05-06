@@ -981,7 +981,7 @@ def main(args):
                     os.makedirs(os.path.dirname(save_fname))
                 np.save(save_fname, np.array([print_result]))
 
-            if args.early_exit_entropy == -1 and args.eval_each_highway:
+            if args.eval_each_highway:
                 last_layer_results = print_result
                 each_layer_results = []
                 for i in range(model.num_layers-1):

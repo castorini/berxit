@@ -8,7 +8,7 @@ from get_data import Data
 
 model = sys.argv[1]
 
-plot_target = 1
+plot_target = 2
 plot_target_name = [
     'routine_comp',
     'layer_etp_acc_comp',
@@ -85,12 +85,15 @@ for i_dataset, dataset in enumerate(datasets):
             )
         except FileNotFoundError:
             pass
-    dataset_axis.set_xlim(0, data_obj.size+1)
-    dataset_axis.legend(loc='lower right', fontsize=15)
-    dataset_axis.set_title(datasets[i_dataset]+' ('+sizes[i_dataset]+')', fontsize=15)
-    dataset_axis.set_xlabel("Exit layer")
-    dataset_axis.set_ylabel("Score")
 
+    try:
+        dataset_axis.set_xlim(0, data_obj.size+1)
+        dataset_axis.legend(loc='lower right', fontsize=15)
+        dataset_axis.set_title(datasets[i_dataset]+' ('+sizes[i_dataset]+')', fontsize=15)
+        dataset_axis.set_xlabel("Exit layer")
+        dataset_axis.set_ylabel("Score")
+    except NameError:
+        pass
 
 
 

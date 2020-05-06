@@ -64,6 +64,7 @@ class AlbertEncoder(nn.Module):
 
         self.early_exit_entropy = [-1 for _ in range(config.num_hidden_layers)]
 
+        self.use_lte = False
         self.use_Qmodule = False
         self.init_Qmodule()
 
@@ -416,7 +417,7 @@ class AlbertForSequenceClassification(AlbertPreTrainedModel):
                     highway_loss = loss_fct(highway_logits.view(-1),
                                             labels.view(-1))
                 else:
-                    loss_fct = CrossEntropyLoss(reduction='mean')
+                    loss_fct = CrossEntropyLoss()
                     highway_loss = loss_fct(highway_logits.view(-1, self.num_labels),
                                             labels.view(-1))
                 highway_losses.append(highway_loss)
@@ -424,49 +425,7 @@ class AlbertForSequenceClassification(AlbertPreTrainedModel):
 
             # loss (first entry of outputs), is no longer one variable, but a list of them
 
-            if train_strategy.endswith("-Qvlstm"):
-                Qmodule_loss = 0
-                ongoing = torch.ones([batch_size, 1]).to(device)
-                for i in range(self.num_layers-1):
-                    if self.num_labels==1:
-                        correctness_loss = torch.pow(
-                            outputs[-1]['highway'][i][0].squeeze() - labels,
-                            2
-                        )
-                    else:
-                        Qmodule_gold = torch.eq(
-                            torch.argmax(outputs[-1]['highway'][i][0], dim=1),
-                            labels
-                        ).long()  # 0 for wrong/continue, 1 for right/exit
-                        correctness_loss = 0.99 - Qmodule_gold.float()*0.98
-                        # soft labels: 1->0.01, 0->0.99
-                    Q_this = outputs[-1]['qmodule'][1][i]  # Q_i
-                    a_0_reward = torch.tensor([-self.core.encoder.alpha]).to(device)  # reward for continue
-                    r_this = torch.stack([
-                        a_0_reward.repeat(batch_size),
-                        - self.core.encoder.beta * correctness_loss
-                        # - self.beta * raw_highway_losses[i].detach()
-                    ], dim=1)
-                    r_this = r_this * ongoing # only ongoing samples have reward
-                    ongoing = ongoing * torch.eq(torch.argmax(Q_this, dim=1), 0).unsqueeze(1)
-                    if i == self.num_layers-2:
-                        Qmodule_loss += torch.mean(
-                            (r_this - Q_this) ** 2
-                        )
-                    else:
-                        Q_next = outputs[-1]['qmodule'][1][i+1]  # Q_{i+1}
-                        Q_next = torch.max(Q_next, dim=1)[0].repeat(2, 1).t()  # this 2 is bad
-                        Qmodule_loss += torch.mean(
-                            (r_this + self.core.encoder.gamma*Q_next - Q_this) ** 2)
-                    # breakpoint_flag = (step_num>=100) and (step_num<=105) and (torch.sum(correctness_loss)>0.5)
-                    # if breakpoint_flag:
-                    #     print(i)
-                    #     print(Q_this)
-                    #     print(r_this)
-                # if breakpoint_flag:
-                #     breakpoint()
-                outputs = ([Qmodule_loss],) + outputs
-            elif train_strategy == 'raw':
+            if train_strategy == 'raw':
                 outputs = ([loss],) + outputs
             elif train_strategy.startswith("limit"):
                 target_layer = int(train_strategy[5:])

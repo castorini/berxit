@@ -18,9 +18,9 @@ DATASET=${3}
 SEED=42
 ROUTINE=${4}
 
-ENTROPIES="0.7 0.8 0.9 1.0 1.1"
+ENTROPIES="0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 1.1"
 
-echo ${MODEL_TYPE}-${MODEL_SIZE}/$DATASET
+echo ${MODEL_TYPE}-${MODEL_SIZE}/$DATASET $ROUTINE
 
 for ENTROPY in $ENTROPIES; do
   printf "\nEntropy $ENTROPY\n"
@@ -34,7 +34,6 @@ for ENTROPY in $ENTROPIES; do
     --output_dir ./saved_models/${MODEL_TYPE}-${MODEL_SIZE}/$DATASET/${ROUTINE}-${SEED} \
     --max_seq_length 128 \
     --seed $SEED \
-    --eval_each_highway \
     --early_exit_entropy $ENTROPY \
     --eval_highway \
     --overwrite_cache \
@@ -42,4 +41,5 @@ for ENTROPY in $ENTROPIES; do
     --train_routine $ROUTINE \
     --log_id $SLURM_JOB_ID \
     --no_comet
+
 done

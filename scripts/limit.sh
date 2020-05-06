@@ -59,6 +59,7 @@ do
     --log_id $SLURM_JOB_ID \
     --limit_layer $LIMIT \
     --no_comet
+
 done
 
 python plotting/collect_limit.py \

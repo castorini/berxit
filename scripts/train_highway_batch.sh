@@ -25,6 +25,11 @@ then
   EPOCHS=3
   MODEL_NAME=${MODEL_NAME}-uncased
 fi
+if [ $MODEL_TYPE = 'albert' ]
+then
+  EPOCHS=3
+  MODEL_NAME=${MODEL_NAME}-v2
+fi
 
 echo ${MODEL_TYPE}-${MODEL_SIZE}/$DATASET
 
@@ -56,4 +61,5 @@ for i in ${!ALPHAS[@]}; do
     --alpha ${ALPHAS[$i]} \
     --beta ${BETAS[$i]} \
     --log_id $SLURM_JOB_ID
+
 done

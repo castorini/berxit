@@ -93,7 +93,7 @@ class RobertaForSequenceClassification(BertPreTrainedModel):
                 loss_fct = MSELoss()
                 loss = loss_fct(logits.view(-1), labels.view(-1))
             else:
-                loss_fct = CrossEntropyLoss('mean')
+                loss_fct = CrossEntropyLoss()
                 loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
 
             # work with highway exits
@@ -111,7 +111,7 @@ class RobertaForSequenceClassification(BertPreTrainedModel):
                     highway_loss = loss_fct(highway_logits.view(-1),
                                             labels.view(-1))
                 else:
-                    loss_fct = CrossEntropyLoss('mean')
+                    loss_fct = CrossEntropyLoss()
                     highway_loss = loss_fct(highway_logits.view(-1, self.num_labels),
                                             labels.view(-1))
                 highway_losses.append(highway_loss)
