@@ -481,9 +481,6 @@ class BertForSequenceClassification(BertPreTrainedModel):
             exit_layer = e.exit_layer
             logits = outputs[0]
 
-        batch_size = logits.shape[0]
-        device = logits.device
-
         original_entropy = entropy(logits)
         highway_entropy = []
         highway_all_logits = []
@@ -496,7 +493,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 loss_fct = MSELoss()
                 loss = loss_fct(logits.view(-1), labels.view(-1))
             else:
-                loss_fct = CrossEntropyLoss(reduction='mean')
+                loss_fct = CrossEntropyLoss()
                 loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
 
             # work with highway exits
@@ -504,7 +501,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
             for i, highway_exit in enumerate(outputs[-1]["highway"]):
                 highway_logits = highway_exit[0]
                 highway_all_logits.append(highway_logits)
-                if not self.train:
+                if not self.train:  # ?
                     highway_entropy.append(highway_exit[2])
 
                 if self.num_labels == 1:

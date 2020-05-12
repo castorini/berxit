@@ -667,16 +667,24 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
                 elif eval_task_name == 'MNLI-MM':
                     eval_task_name = 'MNLI-mm'
                 if 'MNLI' in eval_task_name:
-                    # label_list: contradiction, entailment, neutral
-                    label_list[1], label_list[2] = label_list[2], label_list[1]
+                    # label_list before swapping: contradiction, entailment, neutral
+                    # I'm still very confused
+                    label_list = ['contradiction', 'entailment', 'neutral']
+
+                marker = '1' if eval_task_name=='STS-B' else args.early_exit_entropy
                 submit_fname = args.plot_data_dir + \
                     args.model_name_or_path[2:] + \
-                    "/testset/{}-{}.tsv".format(args.early_exit_entropy, eval_task_name)
+                    "/testset/{}-{}.tsv".format(marker, eval_task_name)
+                if not os.path.exists(os.path.dirname(submit_fname)):
+                    os.makedirs(os.path.dirname(submit_fname))
                 with open(submit_fname, 'w') as fout:
                     print("index\tprediction", file=fout)
+                    print(repr(eval_task_name))
                     for i, p in enumerate(preds):
-                        print('{}\t{}'.format(i, label_list[p]), file=fout)
-
+                        if eval_task_name != 'STS-B':
+                            print('{}\t{}'.format(i, label_list[p]), file=fout)
+                        else:
+                            print('{}\t{:.3f}'.format(i, p), file=fout)
     return results
 
 
@@ -981,7 +989,7 @@ def main(args):
                     os.makedirs(os.path.dirname(save_fname))
                 np.save(save_fname, np.array([print_result]))
 
-            if args.eval_each_highway:
+            if args.eval_each_highway and args.lte_th=='-1':
                 last_layer_results = print_result
                 each_layer_results = []
                 for i in range(model.num_layers-1):

@@ -80,10 +80,9 @@ class RobertaForSequenceClassification(BertPreTrainedModel):
             exit_layer = e.exit_layer
             logits = outputs[0]
 
-        if not self.training:
-            original_entropy = entropy(logits)
-            highway_entropy = []
-            highway_logits_all = []
+        original_entropy = entropy(logits)
+        highway_entropy = []
+        highway_all_logits = []
         if labels is not None:
             if layer_example_counter is not None:
                 layer_example_counter[0] += len(labels)
@@ -98,13 +97,12 @@ class RobertaForSequenceClassification(BertPreTrainedModel):
 
             # work with highway exits
             highway_losses = []
-            goto_next_layer = []
             for i, highway_exit in enumerate(outputs[-1]["highway"]):
                 highway_logits = highway_exit[0]
-
+                highway_all_logits.append(highway_logits)
                 if not self.training:
-                    highway_logits_all.append(highway_logits)
                     highway_entropy.append(highway_exit[2])
+
                 if self.num_labels == 1:
                     #  We are doing regression
                     loss_fct = MSELoss()
@@ -118,7 +116,40 @@ class RobertaForSequenceClassification(BertPreTrainedModel):
 
 
             # loss (first entry of outputs), is no longer one variable, but a list of them
-            if train_strategy == 'raw':
+            if train_strategy.endswith("-lte"):
+                lte_loss_fct = MSELoss()
+                uncertainties = []
+                exit_pred = []
+                for i in range(self.num_layers):
+                    # exit prediction
+                    exit_pred.append(outputs[-1]['lte'][i])  # "uncertainty"
+
+                    # exit label
+                    if self.num_labels == 1:
+                        if i + 1 == self.num_layers:
+                            layer_output = logits
+                        else:
+                            layer_output = outputs[-1]['highway'][i][0]
+                        layer_uncertainty = torch.pow(
+                            layer_output.squeeze() - labels,
+                            2
+                        )
+                    else:
+                        if i + 1 == self.num_layers:
+                            layer_uncertainty = entropy(logits)
+                        else:
+                            layer_uncertainty = entropy(highway_all_logits[i])
+                    uncertainties.append(layer_uncertainty)
+                exit_pred = torch.stack(exit_pred)
+                exit_label = torch.stack(uncertainties).detach()
+
+                # normalize exit label
+                if self.num_labels == 1:
+                    norm_exit_label = 1 - torch.exp(-exit_label)
+                else:
+                    norm_exit_label = torch.clamp(exit_label, min=0.05, max=0.95)
+                outputs = ([lte_loss_fct(exit_pred, norm_exit_label)],) + outputs
+            elif train_strategy == 'raw':
                 outputs = ([loss],) + outputs
             elif train_strategy.startswith("limit"):
                 target_layer = int(train_strategy[5:])
