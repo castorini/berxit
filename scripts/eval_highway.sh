@@ -17,8 +17,15 @@ MODEL_SIZE=${2}  # change partition to t4 if large
 DATASET=${3}
 SEED=42
 ROUTINE=${4}
+TESTSET=${5}  # generate result for the test set
 
-LTE_TH=0 #"0.1,14;0.15,10"
+TESTSET_SWITCH=''
+if [ ! -z $TESTSET ] && [ $TESTSET = 'testset' ]
+then
+  TESTSET_SWITCH='--testset'
+fi
+
+LTE_TH="0.07"  # set it to "-1" for eval_each_highway to work
 
 
 echo ${MODEL_TYPE}-${MODEL_SIZE}/$DATASET $ROUTINE
@@ -38,4 +45,5 @@ python -um examples.run_highway_glue \
   --per_gpu_eval_batch_size=1 \
   --train_routine $ROUTINE \
   --lte_th $LTE_TH \
-  --log_id $SLURM_JOB_ID
+  --log_id $SLURM_JOB_ID \
+  $TESTSET_SWITCH

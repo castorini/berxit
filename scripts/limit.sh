@@ -3,7 +3,7 @@
 #SBATCH -N 1
 #SBATCH -n 1
 #SBATCH --gres=gpu:1
-#SBATCH -p t4
+#SBATCH -p p100
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=24GB
 #SBATCH --output=logs/%j.slurm_out
@@ -24,6 +24,11 @@ then
   EPOCHS=3
   MODEL_NAME=${MODEL_NAME}-uncased
 fi
+if [ $MODEL_TYPE = 'albert' ]
+then
+  EPOCHS=3
+  MODEL_NAME=${MODEL_NAME}-v2
+fi
 
 LAYERS=12
 if [ $MODEL_SIZE = 'large' ]
@@ -33,9 +38,10 @@ then
 fi
 
 echo ${MODEL_TYPE}-${MODEL_SIZE}/$DATASET
+mkdir -p ./plotting/saved_models/${MODEL_TYPE}-${MODEL_SIZE}/$DATASET/limit-${SEED}
 for LIMIT in `seq 0 $(( $LAYERS - 1 ))`;
 do
-  echo 'Limit layer' $LIMIT
+  printf "\nLimit Layer $LIMIT\n"
   python -um examples.run_highway_glue \
     --model_type $MODEL_TYPE \
     --model_name_or_path $MODEL_NAME \

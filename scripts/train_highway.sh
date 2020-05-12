@@ -3,7 +3,7 @@
 #SBATCH -N 1
 #SBATCH -n 1
 #SBATCH --gres=gpu:1
-#SBATCH -p t4
+#SBATCH -p p100
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=24GB
 #SBATCH --output=logs/%j.slurm_out

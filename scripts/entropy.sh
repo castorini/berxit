@@ -17,8 +17,15 @@ MODEL_SIZE=${2}  # change partition to t4 if large
 DATASET=${3}
 SEED=42
 ROUTINE=${4}
+TESTSET=${5}  # generate result for the test set
 
-ENTROPIES="0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 1.1"
+TESTSET_SWITCH=''
+if [ ! -z $TESTSET ] && [ $TESTSET = 'testset' ]
+then
+  TESTSET_SWITCH='--testset'
+fi
+
+ENTROPIES="0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7"
 
 echo ${MODEL_TYPE}-${MODEL_SIZE}/$DATASET $ROUTINE
 
@@ -40,6 +47,7 @@ for ENTROPY in $ENTROPIES; do
     --per_gpu_eval_batch_size=1 \
     --train_routine $ROUTINE \
     --log_id $SLURM_JOB_ID \
-    --no_comet
+    --no_comet \
+    $TESTSET_SWITCH
 
 done
