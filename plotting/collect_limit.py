@@ -19,6 +19,6 @@ col.append(float(np.load(path+'/../two_stage-42/each_layer.npy')[-1]))
 
 try:
     shutil.copyfile(path+'/each_layer.npy', path+'/each_layer.npy.backup')
-    np.save(path+'/each_layer.npy', np.array(col))
 except FileNotFoundError:
     pass
+np.save(path+'/each_layer.npy', np.array(col))
