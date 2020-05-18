@@ -25,6 +25,11 @@ then
   EPOCHS=3
   MODEL_NAME=${MODEL_NAME}-uncased
 fi
+if [ $MODEL_TYPE = 'distilbert' ]
+then
+  EPOCHS=3
+  MODEL_NAME=${MODEL_NAME}-uncased
+fi
 if [ $MODEL_TYPE = 'albert' ]
 then
   EPOCHS=3

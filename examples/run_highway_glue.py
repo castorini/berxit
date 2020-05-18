@@ -50,12 +50,12 @@ from transformers import (WEIGHTS_NAME, BertConfig,
                                   XLNetForSequenceClassification,
                                   XLNetTokenizer,
                                   DistilBertConfig,
-                                  DistilBertForSequenceClassification,
                                   DistilBertTokenizer)
 
 from transformers.modeling_highway_bert import BertForSequenceClassification
 from transformers.modeling_highway_roberta import RobertaForSequenceClassification
 from transformers.modeling_highway_albert import AlbertForSequenceClassification
+from transformers.modeling_highway_distilbert import DistilBertForSequenceClassification
 
 from transformers import AdamW, get_linear_schedule_with_warmup
 
