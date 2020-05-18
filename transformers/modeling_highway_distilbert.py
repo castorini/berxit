@@ -39,6 +39,7 @@ from .file_utils import add_start_docstrings
 from .modeling_distilbert import (Embeddings,
                                   TransformerBlock,
                                   DistilBertPreTrainedModel)
+from .modeling_highway_bert import entropy, HighwayException
 
 import logging
 logger = logging.getLogger(__name__)
@@ -52,6 +53,7 @@ DISTILBERT_PRETRAINED_MODEL_ARCHIVE_MAP = {
 
 class Transformer(nn.Module):
     # this is essentially DistilBertEncoder
+    # lte not added yet
 
     def __init__(self, config):
         super(Transformer, self).__init__()
@@ -61,8 +63,10 @@ class Transformer(nn.Module):
 
         layer = TransformerBlock(config)
         self.layer = nn.ModuleList([copy.deepcopy(layer) for _ in range(config.n_layers)])
-
+        self.highway = nn.ModuleList([DistilBertHighway(config) for _ in range(config.n_layers)])
         self.early_exit_entropy = [-1 for _ in range(config.num_hidden_layers)]
+
+        self.use_lte = False
 
     def set_early_exit_entropy(self, x):
         print(x)
@@ -75,6 +79,7 @@ class Transformer(nn.Module):
     def forward(self, x, attn_mask=None, head_mask=None):
         all_hidden_states = ()
         all_attentions = ()
+        all_highway_exits = ()
 
         hidden_state = x
         for i, layer_module in enumerate(self.layer):
@@ -93,6 +98,30 @@ class Transformer(nn.Module):
             else:
                 assert len(layer_outputs) == 1
 
+            current_outputs = (hidden_state,)
+            if self.output_hidden_states:
+                current_outputs = current_outputs + (all_hidden_states,)
+            if self.output_attentions:
+                current_outputs = current_outputs + (all_attentions,)
+
+            # feed it into highway
+            highway_exit = self.highway[i](current_outputs)
+            highway_entropy = entropy(highway_exit[0])
+
+            if not self.training:
+                highway_exit = highway_exit + (highway_entropy,)
+                all_highway_exits = all_highway_exits + (highway_exit,)
+
+                if (
+                        (i+1 < self.num_layers)
+                    and (highway_entropy < self.early_exit_entropy[i])
+                ):
+                    new_output = (highway_exit[0],) + current_outputs[1:] + \
+                                 ({'highway': all_highway_exits},)
+                    raise HighwayException(new_output, i+1)
+            else:
+                all_highway_exits = all_highway_exits + (highway_exit,)
+
         # Add last layer
         if self.output_hidden_states:
             all_hidden_states = all_hidden_states + (hidden_state,)
@@ -102,7 +131,29 @@ class Transformer(nn.Module):
             outputs = outputs + (all_hidden_states,)
         if self.output_attentions:
             outputs = outputs + (all_attentions,)
+
+        outputs = outputs + ({'highway': all_highway_exits},)
         return outputs  # last-layer hidden state, (all hidden states), (all attentions)
+
+
+class DistilBertHighway(nn.Module):
+
+    def __init__(self, config):
+        super(DistilBertHighway, self).__init__()
+        self.pre_classifier = nn.Linear(config.dim, config.dim)
+        # equivalent to pooler in original bert
+        # whether to load from pre-train: unknown yet
+
+        self.classifier = nn.Linear(config.dim, config.num_labels)
+        self.non_linear = nn.ReLU()
+        self.dropout = nn.Dropout(config.seq_classif_dropout)
+
+    def forward(self, input):
+        hidden_state = input[0][:, 0]
+        logits = self.classifier(self.dropout(
+            self.non_linear(self.pre_classifier(hidden_state))
+        ))
+        return (logits, ) + input[1:]
 
 
 class DistilBertModel(DistilBertPreTrainedModel):
@@ -198,18 +249,30 @@ class DistilBertForSequenceClassification(DistilBertPreTrainedModel):
                 layer_example_counter=None,
                 step_num=-1,
                 ):
-        distilbert_output = self.distilbert(input_ids=input_ids,
-                                            attention_mask=attention_mask,
-                                            head_mask=head_mask,
-                                            inputs_embeds=inputs_embeds)
-        hidden_state = distilbert_output[0]                    # (bs, seq_len, dim)
-        pooled_output = hidden_state[:, 0]                    # (bs, dim)
-        pooled_output = self.pre_classifier(pooled_output)   # (bs, dim)
-        pooled_output = nn.ReLU()(pooled_output)             # (bs, dim)
-        pooled_output = self.dropout(pooled_output)         # (bs, dim)
-        logits = self.classifier(pooled_output)              # (bs, dim)
 
-        outputs = (logits,) + distilbert_output[1:]
+        exit_layer = self.num_layers
+        try:
+            distilbert_output = self.distilbert(input_ids=input_ids,
+                                                attention_mask=attention_mask,
+                                                head_mask=head_mask,
+                                                inputs_embeds=inputs_embeds)
+            hidden_state = distilbert_output[0]                    # (bs, seq_len, dim)
+            pooled_output = hidden_state[:, 0]                    # (bs, dim)
+            pooled_output = self.pre_classifier(pooled_output)   # (bs, dim)
+            pooled_output = nn.ReLU()(pooled_output)             # (bs, dim)
+            pooled_output = self.dropout(pooled_output)         # (bs, dim)
+            logits = self.classifier(pooled_output)              # (bs, dim)
+
+            outputs = (logits,) + distilbert_output[1:]
+        except HighwayException as e:
+            outputs = e.message
+            exit_layer = e.exit_layer
+            logits = outputs[0]
+
+
+        original_entropy = entropy(logits)
+        highway_entropy = []
+        highway_all_logits = []
         if labels is not None:
             if self.num_labels == 1:
                 loss_fct = nn.MSELoss()
@@ -217,6 +280,49 @@ class DistilBertForSequenceClassification(DistilBertPreTrainedModel):
             else:
                 loss_fct = nn.CrossEntropyLoss()
                 loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
-            outputs = ([loss],) + outputs
+
+            # work with highway  exits
+            highway_losses = []
+            for i, highway_exit in enumerate(outputs[-1]['highway']):
+                highway_logits = highway_exit[0]
+                highway_all_logits.append(highway_logits)
+
+                if self.num_labels == 1:
+                    highway_loss = loss_fct(highway_logits.view(-1),
+                                            labels.view(-1))
+                else:
+                    highway_loss = loss_fct(highway_logits.view(-1, self.num_labels),
+                                            labels.view(-1))
+                highway_losses.append(highway_loss)
+
+            if train_strategy == 'raw':
+                outputs = ([loss],) + outputs
+            elif train_strategy.startswith("limit"):
+                target_layer = int(train_strategy[5:])
+                if target_layer + 1 == self.num_layers:
+                    outputs = ([loss],) + outputs
+                else:
+                    outputs = ([highway_losses[target_layer]],) + outputs
+            elif train_strategy == 'only_highway':
+                outputs = ([sum(highway_losses[:-1])],) + outputs
+                # exclude the final highway, of course
+            elif train_strategy in ['all']:
+                outputs = ([sum(highway_losses[:-1]) + loss],) + outputs
+                # all highways (exclude the final one), plus the original classifier
+            elif train_strategy == 'alternate':
+                if step_num % 2 == 0:
+                    outputs = ([loss],) + outputs
+                else:
+                    outputs = ([sum(highway_losses[:-1]) + loss],) + outputs
+                    # all highways (exclude the final one), plus the original classifier
+            else:
+                raise NotImplementedError("Wrong training strategy!")
+
+        if not self.training:
+            outputs = outputs + ((original_entropy, highway_entropy), exit_layer)
+            if output_layer>=0:
+                outputs = (outputs[0],) +\
+                          (highway_all_logits[output_layer],) +\
+                          outputs[2:]
 
         return outputs  # (loss), logits, (hidden_states), (attentions)

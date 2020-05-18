@@ -17,6 +17,7 @@ model_formal_name = {
     'bert': 'BERT',
     'roberta': 'RoBERTa',
     'albert': 'ALBERT',
+    'distilbert': 'DistilBERT',
 }
 plot_target_name = [
     'routine_comp',
