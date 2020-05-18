@@ -519,6 +519,14 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
         if args.n_gpu > 1:
             model = torch.nn.DataParallel(model)
 
+        # init uncertainty record
+        # bad!
+        open(
+            'plotting/saved_models/bert-base'
+            '/STS-B/all_alternate-lte-42/uncertainty.txt',
+            'w'
+        ).close()
+
         # Eval!
         logger.info("***** Running evaluation {} *****".format(prefix))
         logger.info("  Num examples = %d", len(eval_dataset))
@@ -671,7 +679,7 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
                     # I'm still very confused
                     label_list = ['contradiction', 'entailment', 'neutral']
 
-                marker = '1' if eval_task_name=='STS-B' else args.early_exit_entropy
+                marker = '00' if eval_task_name=='STS-B' else args.early_exit_entropy
                 submit_fname = args.plot_data_dir + \
                     args.model_name_or_path[2:] + \
                     "/testset/{}-{}.tsv".format(marker, eval_task_name)
@@ -679,7 +687,6 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
                     os.makedirs(os.path.dirname(submit_fname))
                 with open(submit_fname, 'w') as fout:
                     print("index\tprediction", file=fout)
-                    print(repr(eval_task_name))
                     for i, p in enumerate(preds):
                         if eval_task_name != 'STS-B':
                             print('{}\t{}'.format(i, label_list[p]), file=fout)

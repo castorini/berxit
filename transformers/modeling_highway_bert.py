@@ -181,9 +181,14 @@ class BertEncoder(nn.Module):
                         raise HighwayException(new_output, i+1)
             else:
                 all_highway_exits = all_highway_exits + (highway_exit,)
-        # for i, lo in enumerate(lte_outputs):
-        #     print('{} {:.3f}'.format(i+1, lo), end='\t')
-        # print()
+
+        # uncertainty record
+        # bad!
+        with open('plotting/saved_models/bert-base/STS-B/all_alternate-lte-42/uncertainty.txt', 'a') as fout:
+            print('\t'.join(map(
+                lambda x: str(float(x)),
+                lte_outputs
+            )), file=fout)
 
         # Add last layer
         if self.output_hidden_states:
