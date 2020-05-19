@@ -85,25 +85,6 @@ class BertEncoder(nn.Module):
                     val, rep = float(val), int(rep)
                     self.lte_th = self.lte_th + [val] * rep
 
-        # self.lte_th = [
-        #     0.6,
-        #     0.4,
-        #     0.4,
-        # ] + [0.1] * 9  # bert-base
-        # self.lte_th = [
-        #     0.5,
-        #     0.45,
-        #     0.3,
-        #     0.3,
-        #     0.5,
-        # ] + [0.1] * 19  # bert-large
-
-        self.num_labels = 2
-        if args.task_name in ['sts-b']:
-            self.num_labels = 1
-        elif args.task_name in ['mnli']:
-            self.num_labels = 3
-
         self.use_lte = True
         print(f'lte enabled, th={self.lte_th}')
 
@@ -184,11 +165,11 @@ class BertEncoder(nn.Module):
 
         # uncertainty record
         # bad!
-        with open('plotting/saved_models/bert-base/STS-B/all_alternate-lte-42/uncertainty.txt', 'a') as fout:
-            print('\t'.join(map(
-                lambda x: str(float(x)),
-                lte_outputs
-            )), file=fout)
+        # with open('plotting/saved_models/bert-base/STS-B/all_alternate-lte-42/uncertainty.txt', 'a') as fout:
+        #     print('\t'.join(map(
+        #         lambda x: str(float(x)),
+        #         lte_outputs
+        #     )), file=fout)
 
         # Add last layer
         if self.output_hidden_states:

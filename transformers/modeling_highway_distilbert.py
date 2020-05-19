@@ -30,7 +30,6 @@ import numpy as np
 
 import torch
 import torch.nn as nn
-from torch.nn import CrossEntropyLoss
 
 from .modeling_utils import PreTrainedModel, prune_linear_layer
 from .configuration_distilbert import DistilBertConfig
@@ -58,6 +57,7 @@ class Transformer(nn.Module):
     def __init__(self, config):
         super(Transformer, self).__init__()
         self.num_layers = config.n_layers
+        self.hidden_size = config.dim
         self.output_attentions = config.output_attentions
         self.output_hidden_states = config.output_hidden_states
 
@@ -67,6 +67,27 @@ class Transformer(nn.Module):
         self.early_exit_entropy = [-1 for _ in range(config.num_hidden_layers)]
 
         self.use_lte = False
+        self.init_lte()
+
+    def init_lte(self):
+        self.lte_th = [0.005] * self.num_layers
+        self.lte_classifier = nn.Linear(self.hidden_size, 1)
+        self.lte_activation = nn.Sigmoid()
+
+    def enable_lte(self, args):
+        if args.lte_th is not None:
+            if ',' not in args.lte_th:
+                self.lte_th = [float(args.lte_th)] * self.num_layers
+            else:
+                groups = args.lte_th.split(';')
+                self.lte_th = []
+                for g in groups:
+                    val, rep = g.split(',')
+                    val, rep = float(val), int(rep)
+                    self.lte_th = self.lte_th + [val] * rep
+
+        self.use_lte = True
+        print(f'lte enabled, th={self.lte_th}')
 
     def set_early_exit_entropy(self, x):
         print(x)
@@ -80,6 +101,7 @@ class Transformer(nn.Module):
         all_hidden_states = ()
         all_attentions = ()
         all_highway_exits = ()
+        lte_outputs = []
 
         hidden_state = x
         for i, layer_module in enumerate(self.layer):
@@ -105,8 +127,15 @@ class Transformer(nn.Module):
                 current_outputs = current_outputs + (all_attentions,)
 
             # feed it into highway
-            highway_exit = self.highway[i](current_outputs)
+            highway_exit = self.highway[i](current_outputs)  # logits, hidden_state
             highway_entropy = entropy(highway_exit[0])
+
+            if self.use_lte:
+                lte_input = highway_exit[1]  # hidden states
+                lte_output = self.lte_activation(
+                    self.lte_classifier(lte_input)
+                ).squeeze()
+                lte_outputs.append(lte_output)
 
             if not self.training:
                 highway_exit = highway_exit + (highway_entropy,)
@@ -114,13 +143,20 @@ class Transformer(nn.Module):
 
                 if (
                         (i+1 < self.num_layers)
-                    and (highway_entropy < self.early_exit_entropy[i])
+                    and (
+                                (not self.use_lte and highway_entropy < self.early_exit_entropy[i])
+                             or (self.use_lte and lte_output < self.lte_th[i])
+                        )
                 ):
                     new_output = (highway_exit[0],) + current_outputs[1:] + \
                                  ({'highway': all_highway_exits},)
                     raise HighwayException(new_output, i+1)
             else:
                 all_highway_exits = all_highway_exits + (highway_exit,)
+
+        # print('\t'.join(
+        #     map(lambda x: str(float(x)), lte_outputs)
+        # ))
 
         # Add last layer
         if self.output_hidden_states:
@@ -133,6 +169,8 @@ class Transformer(nn.Module):
             outputs = outputs + (all_attentions,)
 
         outputs = outputs + ({'highway': all_highway_exits},)
+        if self.use_lte:
+            outputs[-1]["lte"] = lte_outputs
         return outputs  # last-layer hidden state, (all hidden states), (all attentions)
 
 
@@ -153,7 +191,7 @@ class DistilBertHighway(nn.Module):
         logits = self.classifier(self.dropout(
             self.non_linear(self.pre_classifier(hidden_state))
         ))
-        return (logits, ) + input[1:]
+        return (logits, hidden_state) + input[1:]
 
 
 class DistilBertModel(DistilBertPreTrainedModel):
@@ -295,7 +333,40 @@ class DistilBertForSequenceClassification(DistilBertPreTrainedModel):
                                             labels.view(-1))
                 highway_losses.append(highway_loss)
 
-            if train_strategy == 'raw':
+            if train_strategy.endswith("-lte"):
+                lte_loss_fct = nn.MSELoss()
+                uncertainties = []
+                exit_pred = []
+                for i in range(self.num_layers):
+                    # exit prediction
+                    exit_pred.append(outputs[-1]['lte'][i])  # "uncertainty"
+
+                    # exit label
+                    if self.num_labels == 1:
+                        if i + 1 == self.num_layers:
+                            layer_output = logits
+                        else:
+                            layer_output = outputs[-1]['highway'][i][0]
+                        layer_uncertainty = torch.pow(
+                            layer_output.squeeze() - labels,
+                            2
+                        )
+                    else:
+                        if i + 1 == self.num_layers:
+                            layer_uncertainty = entropy(logits)
+                        else:
+                            layer_uncertainty = entropy(highway_all_logits[i])
+                    uncertainties.append(layer_uncertainty)
+                exit_pred = torch.stack(exit_pred)
+                exit_label = torch.stack(uncertainties).detach()
+
+                # normalize exit label
+                if self.num_labels == 1:
+                    norm_exit_label = 1 - torch.exp(-exit_label)
+                else:
+                    norm_exit_label = torch.clamp(exit_label, min=0.05, max=0.95)
+                outputs = ([lte_loss_fct(exit_pred, norm_exit_label)],) + outputs
+            elif train_strategy == 'raw':
                 outputs = ([loss],) + outputs
             elif train_strategy.startswith("limit"):
                 target_layer = int(train_strategy[5:])

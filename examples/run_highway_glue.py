@@ -521,11 +521,11 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
 
         # init uncertainty record
         # bad!
-        open(
-            'plotting/saved_models/bert-base'
-            '/STS-B/all_alternate-lte-42/uncertainty.txt',
-            'w'
-        ).close()
+        # open(
+        #     'plotting/saved_models/bert-base'
+        #     '/STS-B/all_alternate-lte-42/uncertainty.txt',
+        #     'w'
+        # ).close()
 
         # Eval!
         logger.info("***** Running evaluation {} *****".format(prefix))
