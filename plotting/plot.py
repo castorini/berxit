@@ -56,7 +56,7 @@ darkcolors = {
 
 if plot_target in [0, 1]:
     datasets = ["RTE", "MRPC", "SST-2", "QNLI", "QQP", "MNLI"]
-    if not model.startswith('bert'):
+    if model.startswith('roberta') or model.startswith('albert'):
         datasets = ['RTE', 'MRPC']
     sizes = ["2.5k", "3.5k", "67k", "108k", "363k", "392k"]
     routines = ["two_stage", "all", "all_alternate", "limit"]

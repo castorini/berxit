@@ -67,21 +67,6 @@ class Data:
                     'acc': np_data[3],
                 }])
         col.sort(key=lambda x: x[1]['mean_exit'])
-
-        # show data
-        if len(col)>0 and self.routine == 'all_alternate':
-            print(self.dataset)
-            print('etp\tlayer\tacc\tdrop')
-            base_acc = col[-1][1]['acc'] * 100
-            for line in col[::-1]:
-                acc = line[1]['acc'] * 100
-                print('{}\t{:.1f}\t{:.2f}\t{:.2f}'.format(
-                    line[0],
-                    line[1]['mean_exit'],
-                    acc,
-                    acc-base_acc,
-                ))
-            print()
         return col
 
     def get_layer_acc(self):
@@ -114,7 +99,33 @@ class DistilbertData:
             'MRPC': 87.5,
             'SST-2': 91.3,
             'QNLI': 89.2,
-            'QQP': 88.5,
+            'QQP': 88.5,  # accuracy not f1
             'MNLI': 82.2,
             'STS-B': 86.9,
         }
+
+class RawBertData:
+    def __init__(self, size):
+        if size=='base':
+            self.layers = 12
+            self.acc = {
+                'RTE': 66.4,
+                'MRPC': 88.9,
+                'SST-2': 93.5,
+                'QNLI': 90.5,
+                'QQP': 71.2,
+                'MNLI': 83.4,
+                'STS-B': 85.8,
+            }
+        elif size=='large':
+            self.layers = 24
+            self.acc = {
+                'RTE': 70.1,
+                'MRPC': 89.3,
+                'SST-2': 94.9,
+                'QNLI': 92.7,
+                'QQP': 72.1,
+                'MNLI': 85.9,
+                'STS-B': 86.5,
+            }
+
