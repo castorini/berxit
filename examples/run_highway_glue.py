@@ -589,6 +589,8 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
             np.save(save_path + "/maxlogit_distri.npy", np.array(maxlogit_collection))
             np.save(save_path + "/correctness_layer{}.npy".format(output_layer),
                     np.array(np.argmax(preds, axis=1) == out_label_ids))
+            np.save(save_path + "/prediction_layer{}.npy".format(output_layer),
+                    np.array(np.argmax(preds, axis=1)))
 
         eval_loss = eval_loss / nb_eval_steps
         if args.output_mode == "classification":
@@ -679,7 +681,7 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
                     # I'm still very confused
                     label_list = ['contradiction', 'entailment', 'neutral']
 
-                marker = '00' if eval_task_name=='STS-B' else args.early_exit_entropy
+                marker = '3' if eval_task_name=='STS-B' else args.early_exit_entropy
                 submit_fname = args.plot_data_dir + \
                     args.model_name_or_path[2:] + \
                     "/testset/{}-{}.tsv".format(marker, eval_task_name)
