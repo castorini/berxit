@@ -487,7 +487,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
             for i, highway_exit in enumerate(outputs[-1]["highway"]):
                 highway_logits = highway_exit[0]
                 highway_all_logits.append(highway_logits)
-                if not self.train:  # ?
+                if not self.training:
                     highway_entropy.append(highway_exit[2])
 
                 if self.num_labels == 1:
