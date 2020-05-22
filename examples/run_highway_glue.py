@@ -617,6 +617,10 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
                 lte_save_fname = args.plot_data_dir + \
                                    args.output_dir + \
                                    "/lte.npy"
+                if args.testset:
+                    lte_save_fname = args.plot_data_dir + \
+                                     args.output_dir + \
+                                     "/lte-test.npy"
                 if not os.path.exists(os.path.dirname(lte_save_fname)):
                     os.makedirs(os.path.dirname(lte_save_fname))
                 if not os.path.exists(lte_save_fname):

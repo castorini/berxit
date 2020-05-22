@@ -194,7 +194,7 @@ class RobertaForSequenceClassification(BertPreTrainedModel):
             outputs = outputs + ((original_entropy, highway_entropy), exit_layer)
             if output_layer >= 0:
                 outputs = (outputs[0],) + \
-                          (highway_logits_all[output_layer],) + \
+                          (highway_all_logits[output_layer],) + \
                           outputs[2:]  ## use the highway of the last layer
 
         return outputs  # (loss), logits, (hidden_states), (attentions), entropy
