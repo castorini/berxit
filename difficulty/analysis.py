@@ -20,8 +20,9 @@ filters = {
 def obtain_data(model, dataset, chosen_layer, filter):
     etp = np.load(f'plotting/saved_models/{model}/{dataset}/'
                   f'{routine}-42/entropy_distri.npy')
+    pred_layer = -1 if chosen_layer==11 else chosen_layer
     pred = np.load(f'plotting/saved_models/{model}/{dataset}/'
-                   f'{routine}-42/prediction_layer{chosen_layer}.npy')
+                   f'{routine}-42/prediction_layer{pred_layer}.npy')
 
     if dataset in ['QQP', 'MRPC']:
         label_processor = int
@@ -62,9 +63,10 @@ def print_table(dataset, col):
             print(file=fout)
 
 
-sample_rate = 5  # one point every this many
+sample_rate = 1  # one point every this many
 def bleu_correlation(col, chosen_layer):
     etp, bleu = [[] for _ in range(3)], [[] for _ in range(3)]
+    correlation = []
     for i, c in enumerate(col):
         if i % sample_rate == 0:
             curr_etp = c[4]
@@ -80,9 +82,12 @@ def bleu_correlation(col, chosen_layer):
     print(f'layer={chosen_layer}')
     for j in range(3):
         if len(etp[j]) < 2:
+            cor = np.nan
             print('N/A', end='\t')
         else:
-            print('{:.3f}'.format(pearsonr(etp[j], bleu[j])[0]), end='\t')
+            cor = pearsonr(etp[j], bleu[j])[0]
+            print('{:.3f}'.format(cor), end='\t')
+        correlation.append(cor)
     print()
     plt.cla()
     plt.scatter(etp[1], bleu[1], s=1, c='r')  # positive
@@ -92,7 +97,10 @@ def bleu_correlation(col, chosen_layer):
     plt.title(f'layer {chosen_layer}')
 
     plt.savefig(f'difficulty/layer{chosen_layer}.png')
+    return correlation
 
-for chosen_layer in range(11):
+layer_correlation = []
+for chosen_layer in range(12):
     col = obtain_data(model, dataset, chosen_layer, filters[dataset])
-    bleu_correlation(col, chosen_layer)
+    layer_correlation.append(bleu_correlation(col, chosen_layer))
+np.save(f'difficulty/{dataset}-cor.npy', np.array(layer_correlation))

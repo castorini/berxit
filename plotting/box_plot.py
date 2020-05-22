@@ -4,6 +4,8 @@ import matplotlib
 import matplotlib.pyplot as plt
 import seaborn as sns
 
+RELATIVE = True
+
 matplotlib.rc('font', size=20)
 matplotlib.rc('text', usetex=True)
 
@@ -39,8 +41,11 @@ axes.set_ylabel(target.capitalize())
 axes.set_title(title)
 
 twin_axes = axes.twinx()
+if RELATIVE:
+    base = np.load(f'saved_models/bert-base/{dataset}/two_stage-42/each_layer.npy')[-1]
+    acc_data = list(map(lambda x: 100*x/base, acc_data))
 twin_axes.plot(acc_data, 'o-')
-twin_axes.set_ylabel("Score")
+twin_axes.set_ylabel("Relative Score (\\%)")
 
 plt.tight_layout()
 # plt.show()

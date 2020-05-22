@@ -7,7 +7,8 @@ formal_name = {
     "all_alternate": "alt",
     "all_alternate-Qvlstm": "alt-Q",
     "all_alternate-lte": "alt-lte",
-    "two_stage": "2stg"
+    "two_stage": "2stg",
+    "self_distil": "sd",
 }
 
 
@@ -35,7 +36,7 @@ class Data:
             self.formal_routine = formal_name[routine]
         self.filepath = f"saved_models/{self.model}/{self.dataset}/{self.routine}-42/"
         if routine.endswith('lte'):
-            self.etp_data = self.get_lte_data()
+            self.etp_data = self.get_lte_data(testset=testset)
         else:
             self.layer_acc = self.get_layer_acc()
             self.etp_data = self.get_etp_data(testset=testset)
@@ -77,8 +78,11 @@ class Data:
         # else:
         return data
 
-    def get_lte_data(self):
-        data = np_load(self.filepath + 'lte.npy')
+    def get_lte_data(self, testset=False):
+        if not testset:
+            data = np_load(self.filepath + 'lte.npy')
+        else:
+            data = np_load(self.filepath + 'lte-test.npy')
         col = []
         for entry in data:
             col.append([entry[4], {
