@@ -67,6 +67,8 @@ if _has_sklearn:
             return acc_and_f1(preds, labels)
         elif task_name == "sts-b":
             return pearson_and_spearman(preds, labels)
+        elif task_name == "sick":
+            return pearson_and_spearman(preds, labels)
         elif task_name == "qqp":
             return acc_and_f1(preds, labels)
         elif task_name == "mnli":

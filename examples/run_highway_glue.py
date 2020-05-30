@@ -519,13 +519,11 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
         if args.n_gpu > 1:
             model = torch.nn.DataParallel(model)
 
-        # init uncertainty record
-        # bad!
-        # open(
-        #     'plotting/saved_models/bert-base'
-        #     '/STS-B/all_alternate-lte-42/uncertainty.txt',
-        #     'w'
-        # ).close()
+        if args.train_routine.endswith('lte') and args.lte_th == '0.0':
+            open(
+                args.plot_data_dir + args.output_dir + '/uncertainty.txt',
+                'w'
+            ).close()
 
         # Eval!
         logger.info("***** Running evaluation {} *****".format(prefix))

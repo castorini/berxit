@@ -86,6 +86,7 @@ class BertEncoder(nn.Module):
                     self.lte_th = self.lte_th + [val] * rep
 
         self.use_lte = True
+        self.print_fname = args.plot_data_dir + args.output_dir + '/uncertainty.txt'
         print(f'lte enabled, th={self.lte_th}')
 
     def set_early_exit_entropy(self, x):
@@ -163,13 +164,12 @@ class BertEncoder(nn.Module):
             else:
                 all_highway_exits = all_highway_exits + (highway_exit,)
 
-        # uncertainty record
-        # bad!
-        # with open('plotting/saved_models/bert-base/STS-B/all_alternate-lte-42/uncertainty.txt', 'a') as fout:
-        #     print('\t'.join(map(
-        #         lambda x: str(float(x)),
-        #         lte_outputs
-        #     )), file=fout)
+        if self.use_lte and self.lte_th == [0.0] * self.num_layers:
+            with open(self.print_fname, 'a') as fout:
+                print('\t'.join(map(
+                    lambda x: str(float(x)),
+                    lte_outputs
+                )), file=fout)
 
         # Add last layer
         if self.output_hidden_states:
