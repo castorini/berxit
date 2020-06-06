@@ -25,7 +25,7 @@ then
   TESTSET_SWITCH='--testset'
 fi
 
-LTE_TH="0.07"  # set it to "-1" for eval_each_highway to work
+LTE_TH="0.0"  # set it to "-1" to trigger eval_each_highway
 
 
 echo ${MODEL_TYPE}-${MODEL_SIZE}/$DATASET $ROUTINE

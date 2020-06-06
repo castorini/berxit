@@ -8,7 +8,7 @@ RELATIVE = True
 matplotlib.rc('font', size=20)
 matplotlib.rc('text', usetex=True)
 
-fig, axes = plt.subplots(2, 1, figsize=[8, 8])
+fig, axes = plt.subplots(2, 1, figsize=[8, 6])
 
 def plot_dataset(axes, dataset):
     title = 'BERT\\textsubscript{\\textsc{base}} : ' + dataset
@@ -41,6 +41,6 @@ def plot_dataset(axes, dataset):
 plot_dataset(axes[0], 'MRPC')
 plot_dataset(axes[1], 'QQP')
 
-plt.tight_layout()
+plt.tight_layout(pad=0.3, h_pad=0.2)
 # plt.show()
 plt.savefig('cor.pdf')

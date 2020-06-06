@@ -65,7 +65,7 @@ class Data:
                     'layer_counter': np_data[0],
                     'time': np_data[1],
                     'mean_exit': self.get_mean_exit(np_data[0]),
-                    'acc': np_data[3],
+                    'acc': np_data[3] * 100,
                 }])
         col.sort(key=lambda x: x[1]['mean_exit'])
         return col
@@ -76,7 +76,7 @@ class Data:
         #     return np.array([x for i, x in enumerate(data)
         #                      if i%2==1])  # MNLI-mm only
         # else:
-        return data
+        return list(map(lambda x: 100*x, data))
 
     def get_lte_data(self, testset=False):
         if not testset:
@@ -89,7 +89,7 @@ class Data:
                 'layer_counter': entry[0],
                 'time': entry[1],
                 'mean_exit': self.get_mean_exit(entry[0]),
-                'acc': entry[3],
+                'acc': entry[3] * 100,
             }])
         col.sort(key=lambda x: x[1]['mean_exit'])
         return col

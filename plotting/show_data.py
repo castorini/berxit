@@ -34,7 +34,7 @@ for ds in datasets:
         shrink = 1
 
     for line in col[::-1]:
-        acc = line[1]['acc'] * 100
+        acc = line[1]['acc']
         print('{}\t{:.1f}\t{:.3f}\t{:.2f}\t{:.3f}\t{:.2f}'.format(
             line[0],
             line[1]['mean_exit'],
