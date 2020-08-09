@@ -12,12 +12,14 @@ dbdata = DistilbertData()
 rbdata = RawBertData(size=model.split('-')[1])
 
 for ds in datasets:
+    ref_data = Data(model, ds, 'two_stage', testset=testset)
     data = Data(model, ds, routine, testset=testset)
     col = data.etp_data
     # show data
     print(ds)
     print('etp\tlayer\tRlayer\tacc\tRacc\tdrop')
-    base_acc = rbdata.acc[ds]
+    # base_acc = rbdata.acc[ds]
+    base_acc = ref_data.layer_acc[-1]
     base_layer = rbdata.layers
     if model.startswith('distil'):
         base_layer = 6
@@ -41,6 +43,6 @@ for ds in datasets:
             line[1]['mean_exit'] / base_layer * shrink,
             acc,
             acc / base_acc,
-            acc -base_acc,
+            acc - base_acc,
             ))
     print()
