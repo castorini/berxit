@@ -1,19 +1,16 @@
 #!/bin/bash
 
-#SBATCH -N 1
-#SBATCH -n 1
-#SBATCH --gres=gpu:1
-#SBATCH -p p100
+#SBATCH --gres=gpu:v100l:1
 #SBATCH --cpus-per-task=2
-#SBATCH --mem=24GB
-#SBATCH --output=logs/%j.slurm_out
+#SBATCH --mem=32GB
+#SBATCH --time=12:0:0
 
 export CUDA_VISIBLE_DEVICES=0
 
 PATH_TO_DATA=/home/xinji/scratch/GLUE
 
 MODEL_TYPE=${1}
-MODEL_SIZE=${2}  # change partition to t4 if large
+MODEL_SIZE=${2}
 DATASET=${3}
 SEED=42
 
@@ -35,6 +32,12 @@ if [ $MODEL_SIZE = 'large' ]
 then
   echo 'REMEMBER TO CHANGE PARTITION INTO T4!'
   LAYERS=24
+fi
+
+if [ -z $SLURM_SRUN_COMM_HOST ]
+then
+  # non-interactive
+  exec &> ${SLURM_TMPDIR}/slurm_out
 fi
 
 echo ${MODEL_TYPE}-${MODEL_SIZE}/$DATASET
@@ -71,3 +74,8 @@ done
 python plotting/collect_limit.py \
   ./plotting/saved_models/${MODEL_TYPE}-${MODEL_SIZE}/$DATASET/limit-${SEED} \
   ${MODEL_SIZE}
+
+if [ -z $SLURM_SRUN_COMM_HOST ]
+then
+  cp ${SLURM_TMPDIR}/slurm_out ./logs/${SLURM_JOB_ID}.slurm_out
+fi

@@ -1,19 +1,16 @@
 #!/bin/bash
 
-#SBATCH -N 1
-#SBATCH -n 1
-#SBATCH --gres=gpu:1
-#SBATCH -p p100
+#SBATCH --gres=gpu:v100l:1
 #SBATCH --cpus-per-task=2
-#SBATCH --mem=24GB
-#SBATCH --output=logs/%j.slurm_out
+#SBATCH --mem=32GB
+#SBATCH --time=12:0:0
 
 export CUDA_VISIBLE_DEVICES=0
 
 PATH_TO_DATA=/home/xinji/scratch/GLUE
 
 MODEL_TYPE=${1}
-MODEL_SIZE=${2}  # change partition to t4 if large
+MODEL_SIZE=${2}
 DATASET=${3}
 SEED=42
 ROUTINE=${4}
@@ -34,6 +31,13 @@ if [ $MODEL_TYPE = 'albert' ]
 then
   EPOCHS=3
   MODEL_NAME=${MODEL_NAME}-v2
+fi
+
+
+if [ -z $SLURM_SRUN_COMM_HOST ]
+then
+  # non-interactive
+  exec &> ${SLURM_TMPDIR}/slurm_out
 fi
 
 LR=2e-5
@@ -66,3 +70,8 @@ python -um examples.run_highway_glue \
   --overwrite_cache \
   --train_routine $ROUTINE \
   --log_id $SLURM_JOB_ID
+
+if [ -z $SLURM_SRUN_COMM_HOST ]
+then
+  cp ${SLURM_TMPDIR}/slurm_out ./logs/${SLURM_JOB_ID}.slurm_out
+fi
