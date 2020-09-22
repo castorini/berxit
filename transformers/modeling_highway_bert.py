@@ -1,3 +1,4 @@
+import math
 import torch
 from torch import nn
 from torch.nn import CrossEntropyLoss, MSELoss
@@ -420,19 +421,39 @@ class BertForSequenceClassification(BertPreTrainedModel):
                     outputs = (loss,) + outputs
                 else:
                     outputs = (highway_losses[target_layer],) + outputs
-            elif train_strategy=='only_highway':
+            elif train_strategy == 'only_highway':
                 outputs = (sum(highway_losses[:-1]),) + outputs
                 # exclude the final highway, of course
-            elif train_strategy in ['all']:
+            elif train_strategy == 'all':
                 outputs = (sum(highway_losses[:-1])+loss,) + outputs
                 # all highways (exclude the final one), plus the original classifier
+            elif train_strategy == 'weight-linear':
+                loss_sum = loss * self.num_layers
+                weight_sum = (1 + self.num_layers) * self.num_layers / 2
+                for i in range(self.num_layers-1):
+                    loss_sum += highway_losses[i] * (1+i)
+                outputs = (loss_sum/weight_sum,) + outputs
+            elif train_strategy == 'weight-sqrt':
+                loss_sum = loss * math.sqrt(self.num_layers)
+                weight_sum = math.sqrt(self.num_layers)
+                for i in range(self.num_layers-1):
+                    loss_sum += highway_losses[i] * math.sqrt(1+i)
+                    weight_sum += math.sqrt(1+i)
+                outputs = (loss_sum/weight_sum,) + outputs
+            elif train_strategy == 'weight-sq':
+                loss_sum = loss * (self.num_layers**2)
+                weight_sum = self.num_layers**2
+                for i in range(self.num_layers-1):
+                    loss_sum += highway_losses[i] * (1+i)**2
+                    weight_sum += (1+i)**2
+                outputs = (loss_sum/weight_sum,) + outputs
             elif train_strategy == 'all_alternate':
                 if step_num%2==0:
                     outputs = (loss,) + outputs
                 else:
                     outputs = (sum(highway_losses[:-1])+loss,) + outputs
                     # all highways (exclude the final one), plus the original classifier
-            elif train_strategy=='self_distil':
+            elif train_strategy == 'self_distil':
                 # the following input_logits are before softmax
                 # final layer logits: logits
                 # logits from layer[i]: outputs[-1]["highway"][i][0]

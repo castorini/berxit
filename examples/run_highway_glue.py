@@ -140,8 +140,8 @@ def get_args():
                         help="The layer for limit training.")
     parser.add_argument("--train_routine",
                         choices=['raw', 'two_stage', 'all', 'self_distil',
-                                 'all_alternate', 'limit', 'layer_wise',
-                                 'all_alternate-lte'],
+                                 'all_alternate', 'limit', 'all_alternate-lte',
+                                 'weight-linear', 'weight-sqrt', 'weight-sq'],
                         default='raw', type=str,
                         help="Training routine (a routine can have mutliple stages, each with different strategies.")
 
@@ -298,7 +298,8 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
                         ("highway" in n) and (any(nd in n for nd in no_decay))],
              'weight_decay': 0.0}
         ]
-    elif train_strategy in ['all', 'self_distil', 'all_alternate', 'limit']:
+    elif train_strategy in ['all', 'self_distil', 'all_alternate', 'limit',
+                            'weight-linear', 'weight-sqrt', 'weight-sq']:
         optimizer_grouped_parameters = [
             {'params': [p for n, p in model.named_parameters() if
                         not any(nd in n for nd in no_decay)],
@@ -817,7 +818,9 @@ def main(args):
             global_step, tr_loss = train(args, train_dataset, model, tokenizer,
                                          train_strategy="only_highway")
 
-        elif args.train_routine in ['raw', 'all', 'all_alternate', 'self_distil', 'limit'] \
+        elif args.train_routine in ['raw', 'all', 'all_alternate',
+                                    'self_distil', 'limit',
+                                    'weight-linear', 'weight-sqrt', 'weight-sq'] \
             or args.train_routine.endswith('-lte'):
 
             global_step, tr_loss = train(args, train_dataset, model, tokenizer,
