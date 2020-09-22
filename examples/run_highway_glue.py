@@ -45,10 +45,6 @@ from transformers import (WEIGHTS_NAME, BertConfig,
                                   RobertaTokenizer,
                                   AlbertConfig,
                                   AlbertTokenizer,
-                                  XLMConfig, XLMForSequenceClassification,
-                                  XLMTokenizer, XLNetConfig,
-                                  XLNetForSequenceClassification,
-                                  XLNetTokenizer,
                                   DistilBertConfig,
                                   DistilBertTokenizer)
 
@@ -64,13 +60,11 @@ from transformers import glue_output_modes as output_modes
 from transformers import glue_processors as processors
 from transformers import glue_convert_examples_to_features as convert_examples_to_features
 
-ALL_MODELS = sum((tuple(conf.pretrained_config_archive_map.keys()) for conf in (BertConfig, XLNetConfig, XLMConfig,
+ALL_MODELS = sum((tuple(conf.pretrained_config_archive_map.keys()) for conf in (BertConfig,
                                                                                 RobertaConfig, AlbertConfig, DistilBertConfig)), ())
 
 MODEL_CLASSES = {
     'bert': (BertConfig, BertForSequenceClassification, BertTokenizer),
-    'xlnet': (XLNetConfig, XLNetForSequenceClassification, XLNetTokenizer),
-    'xlm': (XLMConfig, XLMForSequenceClassification, XLMTokenizer),
     'roberta': (RobertaConfig, RobertaForSequenceClassification, RobertaTokenizer),
     'albert': (AlbertConfig, AlbertForSequenceClassification, AlbertTokenizer),
     'distilbert': (DistilBertConfig, DistilBertForSequenceClassification, DistilBertTokenizer)
@@ -777,15 +771,6 @@ def main(args):
         "model_and_size",
         model_and_size
     )
-    with open("experiment.note") as f:
-        note = ""
-        for line in f:
-            if not line.startswith('#'):
-                note += line.strip() + ' '
-        experiment.log_other(
-            "note",
-            note
-        )
 
     if args.train_routine == 'limit':
         finished_layers = os.listdir(args.plot_data_dir + args.output_dir)

@@ -10,7 +10,7 @@
 
 export CUDA_VISIBLE_DEVICES=0
 
-PATH_TO_DATA=/h/xinji/projects/GLUE
+PATH_TO_DATA=/home/xinji/scratch/GLUE
 
 MODEL_TYPE=${1}
 MODEL_SIZE=${2}  # change partition to t4 if large
