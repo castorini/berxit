@@ -344,7 +344,7 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
     logger.info("  Total optimization steps = %d", t_total)
 
     global_step = 0
-    tr_loss, logging_loss = 0.0, 0.0
+    tr_loss = 0.0
     model.zero_grad()
     train_iterator = trange(int(args.num_train_epochs), desc="Epoch", disable=args.local_rank not in [-1, 0])
     set_seed(args)  # Added here for reproductibility (even between python 2 and 3)
@@ -368,8 +368,8 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
                       'attention_mask': batch[1],
                       'labels': batch[3]}
             if args.model_type != 'distilbert':
-                inputs['token_type_ids'] = batch[2] if args.model_type in ['bert',
-                                                                           'xlnet'] else None  # XLM, DistilBERT and RoBERTa don't use segment_ids
+                inputs['token_type_ids'] = batch[2] if args.model_type == 'bert' else None
+                # XLM, DistilBERT and RoBERTa don't use segment_ids
             if train_strategy=='limit':
                 inputs['train_strategy'] = train_strategy + args.limit_layer
             else:
@@ -402,39 +402,12 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
                     torch.nn.utils.clip_grad_norm_(amp.master_params(optimizer), args.max_grad_norm)
                 else:
                     torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
-
                 optimizer.step()
                 scheduler.step()  # Update learning rate schedule
                 global_step += 1
                 model.zero_grad()
 
-                # this block doesn't work as expected any more
-                # but it only affects tensorboard (which i don't care)
-                if args.local_rank in [-1, 0] \
-                        and args.logging_steps > 0 \
-                        and global_step % args.logging_steps == 0:
-                    # Log metrics
-                    if args.local_rank == -1 and args.evaluate_during_training:  # Only evaluate when single GPU otherwise metrics may not average well
-                        results = evaluate(args, model, tokenizer)
-                        for key, value in results.items():
-                            tb_writer.add_scalar('eval_{}'.format(key), value, global_step)
-                    tb_writer.add_scalar('lr', scheduler.get_lr()[0], global_step)
-                    tb_writer.add_scalar('loss', (tr_loss - logging_loss) / args.logging_steps, global_step)
-                    logging_loss = tr_loss
-
-                # this if block won't be executed
-                if args.local_rank in [-1, 0] \
-                        and args.save_steps > 0 \
-                        and global_step % args.save_steps == 0:
-                    # Save model checkpoint
-                    output_dir = os.path.join(args.output_dir, 'checkpoint-{}'.format(global_step))
-                    if not os.path.exists(output_dir):
-                        os.makedirs(output_dir)
-                    model_to_save = model.module if hasattr(model,
-                                                            'module') else model  # Take care of distributed/parallel training
-                    model_to_save.save_pretrained(output_dir)
-                    torch.save(args, os.path.join(output_dir, 'training_args.bin'))
-                    logger.info("Saving model checkpoint to %s", output_dir)
+                # save model mid-training - not used for now
 
             if args.max_steps > 0 and global_step > args.max_steps:
                 epoch_iterator.close()
@@ -475,6 +448,7 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
             model = torch.nn.DataParallel(model)
 
         if args.train_routine.endswith('lte') and args.lte_th == '0.0':
+            # create an empty file
             open(
                 args.plot_data_dir + args.output_dir + '/uncertainty.txt',
                 'w'
@@ -491,43 +465,40 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
         exit_layer_counter = {(i + 1): 0 for i in range(model.num_layers)}
         entropy_collection = []
         maxlogit_collection = []
-        profiling = False
         st = time.time()
-        with torch.autograd.profiler.profile(enabled=profiling, use_cuda=True) as prof:
-            for batch in tqdm(eval_dataloader, desc="Evaluating"):
-                model.eval()
-                batch = tuple(t.to(args.device) for t in batch)
+        for batch in tqdm(eval_dataloader, desc="Evaluating"):
+            model.eval()
+            batch = tuple(t.to(args.device) for t in batch)
 
-                with torch.no_grad():
-                    inputs = {'input_ids': batch[0],
-                              'attention_mask': batch[1],
-                              'labels': batch[3]}
-                    if args.model_type != 'distilbert':
-                        inputs['token_type_ids'] = batch[2] if args.model_type in ['bert',
-                                                                                   'xlnet'] else None  # XLM, DistilBERT and RoBERTa don't use segment_ids
-                    if output_layer >= 0:
-                        inputs['output_layer'] = output_layer
-                    outputs = model(**inputs)
-                    if eval_highway:
-                        entropy_collection.append(
-                            [x.cpu().item() for x in outputs[3][1][:-1]] + [outputs[3][0].cpu().item()]
-                        )
-                        maxlogit_collection.append(
-                            [torch.max(torch.softmax(x[0], dim=1)).cpu().item() for x in outputs[2]['highway'][:-1]] +\
-                            [torch.max(torch.softmax(outputs[1], dim=1)).cpu().item()]
-                        )
-                        exit_layer_counter[outputs[-1]] += 1
-                    tmp_eval_loss, logits = outputs[:2]
-                    tmp_eval_loss = tmp_eval_loss[-1]
+            with torch.no_grad():
+                inputs = {'input_ids': batch[0],
+                          'attention_mask': batch[1],
+                          'labels': batch[3]}
+                if args.model_type != 'distilbert':
+                    inputs['token_type_ids'] = batch[2] if args.model_type == 'bert' else None
+                    # XLM, DistilBERT and RoBERTa don't use segment_ids
+                if output_layer >= 0:
+                    inputs['output_layer'] = output_layer
+                outputs = model(**inputs)
+                if eval_highway:
+                    entropy_collection.append(
+                        [x.cpu().item() for x in outputs[3][1][:-1]] + [outputs[3][0].cpu().item()]
+                    )
+                    maxlogit_collection.append(
+                        [torch.max(torch.softmax(x[0], dim=1)).cpu().item() for x in outputs[2]['highway'][:-1]] +\
+                        [torch.max(torch.softmax(outputs[1], dim=1)).cpu().item()]
+                    )
+                    exit_layer_counter[outputs[-1]] += 1
+                tmp_eval_loss, logits = outputs[:2]
 
-                    eval_loss += tmp_eval_loss.mean().item()
-                nb_eval_steps += 1
-                if preds is None:
-                    preds = logits.detach().cpu().numpy()
-                    out_label_ids = inputs['labels'].detach().cpu().numpy()
-                else:
-                    preds = np.append(preds, logits.detach().cpu().numpy(), axis=0)
-                    out_label_ids = np.append(out_label_ids, inputs['labels'].detach().cpu().numpy(), axis=0)
+                eval_loss += tmp_eval_loss.mean().item()
+            nb_eval_steps += 1
+            if preds is None:
+                preds = logits.detach().cpu().numpy()
+                out_label_ids = inputs['labels'].detach().cpu().numpy()
+            else:
+                preds = np.append(preds, logits.detach().cpu().numpy(), axis=0)
+                out_label_ids = np.append(out_label_ids, inputs['labels'].detach().cpu().numpy(), axis=0)
 
         eval_time = time.time() - st
         print("Eval time:", eval_time)
@@ -590,9 +561,6 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
                     {'lte_th': model.core.encoder.lte_th}
                 ])
                 np.save(lte_save_fname, np.array(prev_saver))
-                if profiling:
-                    with open(args.plot_data_dir + args.output_dir + "/profile.txt", 'w') as fout:
-                        print(prof.key_averages().table(sort_by="cuda_time_total"), file=fout)
                 experiment.log_metrics({
                     "eval_time": eval_time,
                     "ERS": actual_cost / full_cost,
@@ -720,14 +688,18 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False, testset=False
 def main(args):
 
     experiment.log_parameters(vars(args))
-    if 'saved_models' in args.model_name_or_path:
+    if 'saved_models' in args.model_name_or_path:  # evaluation
         model_and_size = args.model_name_or_path[
                          args.model_name_or_path.find('saved_models') + 13:]
         model_and_size = model_and_size[
                          :model_and_size.find('/')
                          ]
-    else:
-        model_and_size = args.model_name_or_path
+    else:  # training
+        flag = args.model_name_or_path.find('-uncased')
+        if flag == -1:
+            model_and_size = args.model_name_or_path
+        else:
+            model_and_size = args.model_name_or_path[:flag]
     experiment.log_parameter(
         "model_and_size",
         model_and_size
@@ -896,14 +868,6 @@ def main(args):
             model.to(args.device)
             if args.train_routine.endswith('-lte'):
                 model.core.encoder.enable_lte(args)
-                # experiment.log_other(  # TODO: change!
-                #     'note',
-                #     'al={} be={} ga={}'.format(
-                #         model.core.encoder.alpha,
-                #         model.core.encoder.beta,
-                #         model.core.encoder.gamma
-                #     )
-                # )
                 args.eval_highway = True  # triggers ERS measurement
 
             result = evaluate(args, model, tokenizer, prefix=prefix,
@@ -926,7 +890,6 @@ def main(args):
                     logger.info("\n")
                     _result = evaluate(args, model, tokenizer, prefix=prefix,
                                        output_layer=i, eval_highway=args.eval_highway)
-                    # if i + 1 < model.num_layers:
                     each_layer_results.append(get_wanted_result(_result))
                 each_layer_results.append(last_layer_results)
                 experiment.log_other(

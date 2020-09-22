@@ -1,39 +1,8 @@
-# coding=utf-8
-# Copyright 2019-present, the HuggingFace Inc. team, The Google AI Language Team and Facebook, Inc.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-""" PyTorch DistilBERT model
-    adapted in part from Facebook, Inc XLM model (https://github.com/facebookresearch/XLM)
-    and in part from HuggingFace PyTorch version of Google AI Bert model (https://github.com/google-research/bert)
-"""
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-import json
-import logging
-import math
 import copy
-import sys
-from io import open
-
-import itertools
-import numpy as np
-
 import torch
 import torch.nn as nn
-
-from .modeling_utils import PreTrainedModel, prune_linear_layer
-from .configuration_distilbert import DistilBertConfig
-from .file_utils import add_start_docstrings
 
 from .modeling_distilbert import (Embeddings,
                                   TransformerBlock,
@@ -44,15 +13,9 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-DISTILBERT_PRETRAINED_MODEL_ARCHIVE_MAP = {
-    'distilbert-base-uncased': "https://s3.amazonaws.com/models.huggingface.co/bert/distilbert-base-uncased-pytorch_model.bin",
-    'distilbert-base-uncased-distilled-squad': "https://s3.amazonaws.com/models.huggingface.co/bert/distilbert-base-uncased-distilled-squad-pytorch_model.bin"
-}
-
-
 class Transformer(nn.Module):
     # this is essentially DistilBertEncoder
-    # lte not added yet
+    # lte not added yet (?!)
 
     def __init__(self, config):
         super(Transformer, self).__init__()
@@ -216,10 +179,6 @@ class DistilBertModel(DistilBertPreTrainedModel):
         self.embeddings.word_embeddings = new_embeddings
 
     def _prune_heads(self, heads_to_prune):
-        """ Prunes heads of the model.
-            heads_to_prune: dict of {layer_num: list of heads to prune in this layer}
-            See base class PreTrainedModel
-        """
         for layer, heads in heads_to_prune.items():
             self.transformer.layer[layer].attention.prune_heads(heads)
 

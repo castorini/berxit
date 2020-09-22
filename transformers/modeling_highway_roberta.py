@@ -5,18 +5,9 @@ import torch
 import torch.nn as nn
 from torch.nn import CrossEntropyLoss, MSELoss
 
-from .modeling_roberta import RobertaEmbeddings
+from .modeling_roberta import RobertaEmbeddings, ROBERTA_PRETRAINED_MODEL_ARCHIVE_MAP
 from .modeling_highway_bert import BertModel, BertPreTrainedModel, entropy, HighwayException
 from .configuration_roberta import RobertaConfig
-
-ROBERTA_PRETRAINED_MODEL_ARCHIVE_MAP = {
-    'roberta-base': "https://s3.amazonaws.com/models.huggingface.co/bert/roberta-base-pytorch_model.bin",
-    'roberta-large': "https://s3.amazonaws.com/models.huggingface.co/bert/roberta-large-pytorch_model.bin",
-    'roberta-large-mnli': "https://s3.amazonaws.com/models.huggingface.co/bert/roberta-large-mnli-pytorch_model.bin",
-    'distilroberta-base': "https://s3.amazonaws.com/models.huggingface.co/bert/distilroberta-base-pytorch_model.bin",
-    'roberta-base-openai-detector': "https://s3.amazonaws.com/models.huggingface.co/bert/roberta-base-openai-detector-pytorch_model.bin",
-    'roberta-large-openai-detector': "https://s3.amazonaws.com/models.huggingface.co/bert/roberta-large-openai-detector-pytorch_model.bin",
-}
 
 
 class RobertaModel(BertModel):

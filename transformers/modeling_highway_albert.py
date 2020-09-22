@@ -1,23 +1,3 @@
-# coding=utf-8
-# Copyright 2018 Google AI, Google Brain and the HuggingFace Inc. team.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-"""PyTorch ALBERT model. """
-
-import logging
-import math
-import os
-
 import torch
 import torch.nn as nn
 from torch.nn import CrossEntropyLoss, MSELoss
@@ -27,25 +7,10 @@ from transformers.configuration_albert import AlbertConfig
 from .modeling_albert import (AlbertEmbeddings,
                               AlbertLayerGroup,
                               AlbertPreTrainedModel,
-                              load_tf_weights_in_albert)
+                              load_tf_weights_in_albert,
+                              ALBERT_PRETRAINED_MODEL_ARCHIVE_MAP)
 from .modeling_highway_bert import entropy, HighwayException, BertHighway
 
-
-
-
-logger = logging.getLogger(__name__)
-
-
-ALBERT_PRETRAINED_MODEL_ARCHIVE_MAP = {
-    "albert-base-v1": "https://s3.amazonaws.com/models.huggingface.co/bert/albert-base-v1-pytorch_model.bin",
-    "albert-large-v1": "https://s3.amazonaws.com/models.huggingface.co/bert/albert-large-v1-pytorch_model.bin",
-    "albert-xlarge-v1": "https://s3.amazonaws.com/models.huggingface.co/bert/albert-xlarge-v1-pytorch_model.bin",
-    "albert-xxlarge-v1": "https://s3.amazonaws.com/models.huggingface.co/bert/albert-xxlarge-v1-pytorch_model.bin",
-    "albert-base-v2": "https://s3.amazonaws.com/models.huggingface.co/bert/albert-base-v2-pytorch_model.bin",
-    "albert-large-v2": "https://s3.amazonaws.com/models.huggingface.co/bert/albert-large-v2-pytorch_model.bin",
-    "albert-xlarge-v2": "https://s3.amazonaws.com/models.huggingface.co/bert/albert-xlarge-v2-pytorch_model.bin",
-    "albert-xxlarge-v2": "https://s3.amazonaws.com/models.huggingface.co/bert/albert-xxlarge-v2-pytorch_model.bin",
-}
 
 
 class AlbertEncoder(nn.Module):
@@ -65,39 +30,6 @@ class AlbertEncoder(nn.Module):
         self.early_exit_entropy = [-1 for _ in range(config.num_hidden_layers)]
 
         self.use_lte = False
-        self.use_Qmodule = False
-        self.init_Qmodule()
-
-    def init_Qmodule(self):
-        # hyperparameters for balancing loss
-        self.alpha = 0.01
-        self.beta = 0.6
-        self.gamma = 1.0
-
-        # Qmodule itself
-        self.Qmodule_size = 10
-        self.Qmodule_classifier = nn.Linear(self.Qmodule_size + 4, 2)
-        # +4: 3 for logits, 1 for entropy (0 padding for regression tasks)
-        self.Qmodule_activation = nn.Tanh()
-
-        self.pool_1d = torch.nn.AdaptiveAvgPool1d(self.Qmodule_size)
-
-    def enable_Qmodule(self, args):
-        if args.alpha is not None:
-            self.alpha = args.alpha
-        if args.beta is not None:
-            self.beta = args.beta
-        if args.gamma is not None:
-            self.gamma = args.gamma
-
-        self.num_labels = 2
-        if args.task_name in ['sts-b']:
-            self.num_labels = 1
-        elif args.task_name in ['mnli']:
-            self.num_labels = 3
-
-        self.use_Qmodule = True
-        print(f'Qmodule initialized')
 
     def set_early_exit_entropy(self, x):
         print(x)
@@ -121,19 +53,8 @@ class AlbertEncoder(nn.Module):
         all_hidden_states = ()
         all_highway_exits = ()
 
-        Qmodule_outputs = []
-        Qmodule_classifier_outputs = []
-
         batch_size = hidden_states.shape[0]
         device = hidden_states.device
-
-        if self.use_Qmodule:
-            if self.num_labels == 2:
-                zeros = torch.tensor(
-                    [[0.0] for _ in range(batch_size)]).to(device)
-            elif self.num_labels == 1:
-                zeros = torch.tensor(
-                    [[0.0, 0.0, 0.0] for _ in range(batch_size)]).to(device)
 
         if self.output_hidden_states:
             # this is different from BERT! the output of embedding layer is included
@@ -168,58 +89,23 @@ class AlbertEncoder(nn.Module):
                 all_hidden_states = all_hidden_states + (hidden_states,)
 
             # the block for highway
-            with torch.autograd.profiler.record_function('highway'):
-                highway_exit = self.highway[i](current_outputs)
-                # logits, pooled_output
+            highway_exit = self.highway[i](current_outputs)
+            # logits, pooled_output
 
             highway_entropy = entropy(highway_exit[0])
 
-            # the block for Qmodule
-            if self.use_Qmodule:
-                with torch.autograd.profiler.record_function('qmodule'):
-                    pooling_out = self.pool_1d(highway_exit[1].unsqueeze(0)).squeeze(0)
-                    if self.num_labels==3:
-                        Qmodule_classifier_input = torch.cat([
-                            pooling_out,
-                            highway_exit[0],
-                            entropy(highway_exit[0]).unsqueeze(1)
-                        ], dim=1)
-                    elif self.num_labels==2:
-                        # add extra zero-vector for shape consistence
-                        Qmodule_classifier_input = torch.cat([
-                            pooling_out,
-                            highway_exit[0],
-                            highway_entropy.unsqueeze(1),
-                            zeros
-                        ], dim=1)
-                    elif self.num_labels==1:
-                        # add extra zero-vector for shape consistence
-                        Qmodule_classifier_input = torch.cat([
-                            pooling_out,
-                            highway_exit[0],
-                            zeros
-                        ], dim=1)
-                    Qmodule_classifier_output = self.Qmodule_activation(
-                        self.Qmodule_classifier(Qmodule_classifier_input)
-                    )
-                    Qmodule_classifier_outputs.append(Qmodule_classifier_output)
-
             if not self.training:
-                with torch.autograd.profiler.record_function('earlyexit'):
-                    highway_exit = highway_exit + (highway_entropy,)  # logits, hidden_states(?), entropy
-                    all_highway_exits = all_highway_exits + (highway_exit,)
+                highway_exit = highway_exit + (highway_entropy,)  # logits, hidden_states(?), entropy
+                all_highway_exits = all_highway_exits + (highway_exit,)
 
-                    # if np.random.rand() < 0.1:  # compare against random exit
-                    if (
-                            (i+1 < self.num_layers)
-                        and (
-                                (self.use_Qmodule and torch.argmax(Qmodule_classifier_output)==1)
-                             or (not self.use_Qmodule and highway_entropy < self.early_exit_entropy[i])
-                            )
-                    ):
-                        new_output = (highway_exit[0],) + current_outputs[1:] + \
-                                     ({'highway': all_highway_exits},)
-                        raise HighwayException(new_output, i+1)
+                # if np.random.rand() < 0.1:  # compare against random exit
+                if (
+                        i+1 < self.num_layers \
+                    and highway_entropy < self.early_exit_entropy[i]
+                ):
+                    new_output = (highway_exit[0],) + current_outputs[1:] + \
+                                 ({'highway': all_highway_exits},)
+                    raise HighwayException(new_output, i+1)
             else:
                 all_highway_exits = all_highway_exits + (highway_exit,)
 
@@ -234,8 +120,6 @@ class AlbertEncoder(nn.Module):
             outputs = outputs + (all_attentions,)
 
         outputs = outputs + ({"highway": all_highway_exits},)
-        if self.use_Qmodule:
-            outputs[-1]["qmodule"] = (Qmodule_outputs, Qmodule_classifier_outputs)
 
         return outputs  # last-layer hidden state, (all hidden states), (all attentions), all highway exits
 
