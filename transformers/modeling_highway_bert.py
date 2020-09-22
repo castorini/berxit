@@ -533,26 +533,26 @@ class BertForSequenceClassification(BertPreTrainedModel):
                     norm_exit_label = 1 - torch.exp(-exit_label)
                 else:
                     norm_exit_label = torch.clamp(exit_label, min=0.05, max=0.95)
-                outputs = ([lte_loss_fct(exit_pred, norm_exit_label)],) + outputs
+                outputs = (lte_loss_fct(exit_pred, norm_exit_label),) + outputs
             elif train_strategy == 'raw':
-                outputs = ([loss],) + outputs
+                outputs = (loss,) + outputs
             elif train_strategy.startswith("limit"):
                 target_layer = int(train_strategy[5:])
                 if target_layer+1 == self.num_layers:
-                    outputs = ([loss],) + outputs
+                    outputs = (loss,) + outputs
                 else:
-                    outputs = ([highway_losses[target_layer]],) + outputs
+                    outputs = (highway_losses[target_layer],) + outputs
             elif train_strategy=='only_highway':
-                outputs = ([sum(highway_losses[:-1])],) + outputs
+                outputs = (sum(highway_losses[:-1]),) + outputs
                 # exclude the final highway, of course
             elif train_strategy in ['all']:
-                outputs = ([sum(highway_losses[:-1])+loss],) + outputs
+                outputs = (sum(highway_losses[:-1])+loss,) + outputs
                 # all highways (exclude the final one), plus the original classifier
-            elif train_strategy == 'alternate':
+            elif train_strategy == 'all_alternate':
                 if step_num%2==0:
-                    outputs = ([loss],) + outputs
+                    outputs = (loss,) + outputs
                 else:
-                    outputs = ([sum(highway_losses[:-1])+loss],) + outputs
+                    outputs = (sum(highway_losses[:-1])+loss,) + outputs
                     # all highways (exclude the final one), plus the original classifier
             elif train_strategy=='self_distil':
                 # the following input_logits are before softmax
@@ -568,10 +568,8 @@ class BertForSequenceClassification(BertPreTrainedModel):
                         - temperature**2 * torch.sum(
                             teacher_softmax * torch.log(student_softmax))
                     )
-                outputs = ([sum(highway_losses[:-1]) + loss + sum(distil_losses)],)\
+                outputs = (sum(highway_losses[:-1]) + loss + sum(distil_losses),)\
                           + outputs
-            elif train_strategy=='layer_wise':
-                outputs = (highway_losses[:-1]+[loss],) + outputs
             else:
                 raise NotImplementedError("Wrong training strategy!")
 

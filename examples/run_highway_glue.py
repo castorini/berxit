@@ -225,6 +225,32 @@ def get_wanted_result(result):
     return print_result
 
 
+def cal_num_parameters(model):
+    counter = {
+        "embedding": 0,
+        "layernorm": 0,
+        "trm": 0,
+        "highway": 0,
+        "final": 0,
+        "all": 0
+    }
+    for n, p in model.named_parameters():
+        size = p.numel()
+        if "highway" in n:
+            counter["highway"] += size
+        elif "layer" in n:
+            counter["trm"] += size
+        elif "LayerNorm" in n:
+            counter["layernorm"] += size
+        elif "embedding" in n:
+            counter["embedding"] += size
+        else:
+            print(n)
+            counter["final"] += size
+        counter["all"] += size
+    return counter
+
+
 def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
     """ Train the model """
     if args.local_rank in [-1, 0]:
@@ -240,32 +266,7 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
     else:
         t_total = len(train_dataloader) // args.gradient_accumulation_steps * args.num_train_epochs
 
-    calculate_number_of_parameters = False
-    if calculate_number_of_parameters:
-        counter = {
-            "embedding": 0,
-            "layernorm": 0,
-            "trm": 0,
-            "highway": 0,
-            "final": 0,
-            "all": 0
-        }
-        for n, p in model.named_parameters():
-            size = p.numel()
-            if "highway" in n:
-                counter["highway"] += size
-            elif "layer" in n:
-                counter["trm"] += size
-            elif "LayerNorm" in n:
-                counter["layernorm"] += size
-            elif "embedding" in n:
-                counter["embedding"] += size
-            else:
-                print(n)
-                counter["final"] += size
-            counter["all"] += size
-        print(counter)
-        exit(0)
+    # cal_num_parameters(model)
 
     # Prepare optimizer and schedule (linear warmup and decay)
     no_decay = ['bias', 'LayerNorm.weight']
@@ -297,7 +298,7 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
                         ("highway" in n) and (any(nd in n for nd in no_decay))],
              'weight_decay': 0.0}
         ]
-    elif train_strategy in ['all', 'self_distil', 'alternate', 'limit']:
+    elif train_strategy in ['all', 'self_distil', 'all_alternate', 'limit']:
         optimizer_grouped_parameters = [
             {'params': [p for n, p in model.named_parameters() if
                         not any(nd in n for nd in no_decay)],
@@ -306,45 +307,10 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
                         any(nd in n for nd in no_decay)],
              'weight_decay': 0.0}
         ]
-    elif train_strategy == 'layer_wise':
-        optimizer_parameters_lst = []
-        for i in range(model.num_layers):
-            layer_parameters = []
-            for n, p in model.named_parameters():
-                if i == 0 and (n.startswith("bert.embeddings")
-                               or "layer.0." in n
-                               or "highway.0." in n):
-                    layer_parameters.append((n, p))
-                if i > 0 and i < model.num_layers - 1 and '.' + str(i) + '.' in n:
-                    layer_parameters.append((n, p))
-                if i == model.num_layers - 1 and (n.startswith("bert.pooler")
-                                                  or n.startswith("classifier")
-                                                  or "layer.{}.".format(model.num_layers - 1) in n):
-                    layer_parameters.append((n, p))
-            optimizer_parameters_lst.append([
-                {'params': [p for n, p in layer_parameters if
-                            not any(nd in n for nd in no_decay)],
-                 'weight_decay': args.weight_decay},
-                {'params': [p for n, p in layer_parameters if
-                            any(nd in n for nd in no_decay)],
-                 'weight_decay': 0.0}
-            ])
     else:
         raise NotImplementedError("Wrong training strategy!")
 
-    if train_strategy == 'layer_wise':
-        optimizers = []
-        for i in range(model.num_layers):
-            optimizers.append(
-                AdamW(optimizer_parameters_lst[i], lr=args.learning_rate, eps=args.adam_epsilon)
-            )
-    else:
-        optimizers = [AdamW(optimizer_grouped_parameters, lr=args.learning_rate, eps=args.adam_epsilon)]
-    if len(optimizers) == 1:
-        optimizer = optimizers[0]
-    else:
-        optimizer = optimizers[-1]
-
+    optimizer = AdamW(optimizer_grouped_parameters, lr=args.learning_rate, eps=args.adam_epsilon)
     scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=args.warmup_steps,
                                                 num_training_steps=t_total)
 
@@ -411,69 +377,64 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
             inputs['layer_example_counter'] = layer_example_counter
             inputs['step_num'] = step
             outputs = model(**inputs)
-            losses = outputs[0]  # model outputs are always tuple in transformers (see doc)
+            loss = outputs[0]  # model outputs are always tuple in transformers (see doc)
 
-            for i in range(len(losses)):
-                # i is the index of loss terms and also the optimizer to backprop it
-                loss = losses[i]
-                optimizer = optimizers[i]
+            if args.n_gpu > 1:
+                loss = loss.mean()  # mean() to average on multi-gpu parallel training
+            if args.gradient_accumulation_steps > 1:
+                loss = loss / args.gradient_accumulation_steps
 
-                if args.n_gpu > 1:
-                    loss = loss.mean()  # mean() to average on multi-gpu parallel training
-                if args.gradient_accumulation_steps > 1:
-                    loss = loss / args.gradient_accumulation_steps
+            if args.fp16:
+                with amp.scale_loss(loss, optimizer) as scaled_loss:
+                    scaled_loss.backward(retain_graph=True)
+            else:
+                loss.backward(retain_graph=True)
+            tr_loss += loss.item()
 
+            if print_loss_switch and step%10==0:
+                print(cumu_loss/10)
+                cumu_loss = 0
+            cumu_loss += loss.item()
+
+            epoch_loss += loss.item()
+            if (step + 1) % args.gradient_accumulation_steps == 0:
                 if args.fp16:
-                    with amp.scale_loss(loss, optimizer) as scaled_loss:
-                        scaled_loss.backward(retain_graph=True)
+                    torch.nn.utils.clip_grad_norm_(amp.master_params(optimizer), args.max_grad_norm)
                 else:
-                    loss.backward(retain_graph=True)
-                tr_loss += loss.item()
-                if print_loss_switch and step%10==0:
-                    print(cumu_loss/10)
-                    cumu_loss = 0
-                cumu_loss += loss.item()
-                epoch_loss += loss.item()
-                if (step + 1) % args.gradient_accumulation_steps == 0:
-                    if args.fp16:
-                        torch.nn.utils.clip_grad_norm_(amp.master_params(optimizer), args.max_grad_norm)
-                    else:
-                        torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
 
-                    optimizer.step()
-                    if i == len(losses) - 1:
-                        scheduler.step()  # Update learning rate schedule
-                        global_step += 1
-                    model.zero_grad()
+                optimizer.step()
+                scheduler.step()  # Update learning rate schedule
+                global_step += 1
+                model.zero_grad()
 
-                    # this block doesn't work as expected any more
-                    # but it only affects tensorboard (which i don't care)
-                    if args.local_rank in [-1, 0] \
-                            and args.logging_steps > 0 \
-                            and global_step % args.logging_steps == 0:
-                        # Log metrics
-                        if args.local_rank == -1 and args.evaluate_during_training:  # Only evaluate when single GPU otherwise metrics may not average well
-                            results = evaluate(args, model, tokenizer)
-                            for key, value in results.items():
-                                tb_writer.add_scalar('eval_{}'.format(key), value, global_step)
-                        tb_writer.add_scalar('lr', scheduler.get_lr()[0], global_step)
-                        tb_writer.add_scalar('loss', (tr_loss - logging_loss) / args.logging_steps, global_step)
-                        logging_loss = tr_loss
+                # this block doesn't work as expected any more
+                # but it only affects tensorboard (which i don't care)
+                if args.local_rank in [-1, 0] \
+                        and args.logging_steps > 0 \
+                        and global_step % args.logging_steps == 0:
+                    # Log metrics
+                    if args.local_rank == -1 and args.evaluate_during_training:  # Only evaluate when single GPU otherwise metrics may not average well
+                        results = evaluate(args, model, tokenizer)
+                        for key, value in results.items():
+                            tb_writer.add_scalar('eval_{}'.format(key), value, global_step)
+                    tb_writer.add_scalar('lr', scheduler.get_lr()[0], global_step)
+                    tb_writer.add_scalar('loss', (tr_loss - logging_loss) / args.logging_steps, global_step)
+                    logging_loss = tr_loss
 
-                    # this if block won't be executed
-                    if args.local_rank in [-1, 0] \
-                            and i == 0 \
-                            and args.save_steps > 0 \
-                            and global_step % args.save_steps == 0:
-                        # Save model checkpoint
-                        output_dir = os.path.join(args.output_dir, 'checkpoint-{}'.format(global_step))
-                        if not os.path.exists(output_dir):
-                            os.makedirs(output_dir)
-                        model_to_save = model.module if hasattr(model,
-                                                                'module') else model  # Take care of distributed/parallel training
-                        model_to_save.save_pretrained(output_dir)
-                        torch.save(args, os.path.join(output_dir, 'training_args.bin'))
-                        logger.info("Saving model checkpoint to %s", output_dir)
+                # this if block won't be executed
+                if args.local_rank in [-1, 0] \
+                        and args.save_steps > 0 \
+                        and global_step % args.save_steps == 0:
+                    # Save model checkpoint
+                    output_dir = os.path.join(args.output_dir, 'checkpoint-{}'.format(global_step))
+                    if not os.path.exists(output_dir):
+                        os.makedirs(output_dir)
+                    model_to_save = model.module if hasattr(model,
+                                                            'module') else model  # Take care of distributed/parallel training
+                    model_to_save.save_pretrained(output_dir)
+                    torch.save(args, os.path.join(output_dir, 'training_args.bin'))
+                    logger.info("Saving model checkpoint to %s", output_dir)
 
             if args.max_steps > 0 and global_step > args.max_steps:
                 epoch_iterator.close()
@@ -870,12 +831,10 @@ def main(args):
     if args.do_train:
         train_dataset = load_and_cache_examples(args, args.task_name, tokenizer, evaluate=False)
 
-        if args.train_routine in ["raw"]:
-            global_step, tr_loss = train(args, train_dataset, model, tokenizer)
-            logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
-
-        elif args.train_routine == "two_stage":
-            global_step, tr_loss = train(args, train_dataset, model, tokenizer)
+        if args.train_routine == "two_stage":
+            # first stage
+            global_step, tr_loss = train(args, train_dataset, model, tokenizer,
+                                         train_strategy='raw')
             logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
             result = evaluate(args, model, tokenizer, prefix="")
             print_result = get_wanted_result(result)
@@ -883,40 +842,15 @@ def main(args):
             experiment.log_metric("Result after first stage training", print_result)
 
             # second stage
-            train(args, train_dataset, model, tokenizer, train_strategy="only_highway")
-
-        elif args.train_routine == 'layer_wise':
-            global_step, tr_loss = train(args, train_dataset, model, tokenizer)
-            logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
-            result = evaluate(args, model, tokenizer, prefix="")
-            print_result = get_wanted_result(result)
-            print("result: {}".format(print_result))
-            experiment.log_metric("Result after first stage training", print_result)
-
             global_step, tr_loss = train(args, train_dataset, model, tokenizer,
-                                         train_strategy="layer_wise")
-            logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
+                                         train_strategy="only_highway")
 
-        elif args.train_routine in ['all']:
-            global_step, tr_loss = train(args, train_dataset, model, tokenizer,
-                                         train_strategy='all')
-            logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
+        elif args.train_routine in ['raw', 'all', 'all_alternate', 'self_distil', 'limit'] \
+            or args.train_routine.endswith('-lte'):
 
-        elif args.train_routine in ['all_alternate']:
-            global_step, tr_loss = train(args, train_dataset, model, tokenizer,
-                                         train_strategy='alternate')
-            logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
-
-        elif args.train_routine in ['self_distil', 'limit']:
             global_step, tr_loss = train(args, train_dataset, model, tokenizer,
                                          train_strategy=args.train_routine)
             logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
-
-        elif args.train_routine.endswith("-lte"):
-
-            train(args, train_dataset, model, tokenizer,
-                  train_strategy=args.train_routine)
-
 
         else:
             raise NotImplementedError("Wrong training routine!")
