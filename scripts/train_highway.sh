@@ -3,7 +3,7 @@
 #SBATCH --gres=gpu:v100l:1
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=32GB
-#SBATCH --time=1:30:0
+#SBATCH --time=15:0:0
 #SBATCH --output=/dev/null
 
 export CUDA_VISIBLE_DEVICES=0
@@ -42,7 +42,7 @@ then
 fi
 
 LR=2e-5
-if [[ $ROUTINE = *lte ]]
+if [[ $ROUTINE = *-lte ]]
 then
   EPOCHS=1
   LR=2e-4

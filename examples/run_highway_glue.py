@@ -143,7 +143,7 @@ def get_args():
                                  'raw', 'self_distil', 'limit',
                                  'weight-linear', 'weight-sqrt', 'weight-sq',
                                  'all_alternate-lte',
-                                 'all-singlelayer-jlte'
+                                 'all-singlelayer-jlte', 'all-alllayer-jlte'
                                  ],
                         default='raw', type=str,
                         help="Training routine (a routine can have mutliple stages, each with different strategies.")
@@ -508,7 +508,7 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
         eval_time = time.time() - st
         print("Eval time:", eval_time)
 
-        if eval_highway and args.early_exit_entropy==-1:
+        if eval_highway and args.early_exit_entropy==-1 and not args.do_train:
             # also record correctness per layer
             save_path = args.plot_data_dir + \
                          args.model_name_or_path[2:]
@@ -543,38 +543,39 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
             print("Expected saving", actual_cost / full_cost)
 
             if model.core.encoder.use_lte:
-                lte_save_fname = args.plot_data_dir + \
-                                   args.output_dir + \
-                                   "/lte.npy"
-                if args.testset:
+                if not args.do_train:
                     lte_save_fname = args.plot_data_dir + \
-                                     args.output_dir + \
-                                     "/lte-test.npy"
-                if not os.path.exists(os.path.dirname(lte_save_fname)):
-                    os.makedirs(os.path.dirname(lte_save_fname))
-                if not os.path.exists(lte_save_fname):
-                    prev_saver = []
-                else:
-                    prev_saver = np.load(lte_save_fname, allow_pickle=True).tolist()
+                                       args.output_dir + \
+                                       "/lte.npy"
+                    if args.testset:
+                        lte_save_fname = args.plot_data_dir + \
+                                         args.output_dir + \
+                                         "/lte-test.npy"
+                    if not os.path.exists(os.path.dirname(lte_save_fname)):
+                        os.makedirs(os.path.dirname(lte_save_fname))
+                    if not os.path.exists(lte_save_fname):
+                        prev_saver = []
+                    else:
+                        prev_saver = np.load(lte_save_fname, allow_pickle=True).tolist()
 
-                print_result = get_wanted_result(result)
-                prev_saver.append([
-                    exit_layer_counter,
-                    eval_time,
-                    actual_cost / full_cost,
-                    print_result,
-                    {'lte_th': model.core.encoder.lte_th}
-                ])
-                np.save(lte_save_fname, np.array(prev_saver))
-                experiment.log_metrics({
-                    "eval_time": eval_time,
-                    "ERS": actual_cost / full_cost,
-                    "result": print_result
-                })
-                experiment.log_other(
-                    "exit_layer_counter",
-                    str(exit_layer_counter),
-                )
+                    print_result = get_wanted_result(result)
+                    prev_saver.append([
+                        exit_layer_counter,
+                        eval_time,
+                        actual_cost / full_cost,
+                        print_result,
+                        {'lte_th': model.core.encoder.lte_th}
+                    ])
+                    np.save(lte_save_fname, np.array(prev_saver))
+                    experiment.log_metrics({
+                        "eval_time": eval_time,
+                        "ERS": actual_cost / full_cost,
+                        "result": print_result
+                    })
+                    experiment.log_other(
+                        "exit_layer_counter",
+                        str(exit_layer_counter),
+                    )
 
             elif args.early_exit_entropy >= -0.5:
                 save_fname = args.plot_data_dir + \
