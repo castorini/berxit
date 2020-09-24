@@ -307,8 +307,6 @@ class AlbertForSequenceClassification(AlbertPreTrainedModel):
                 highway_losses.append(highway_loss)
                 # raw_highway_losses.append(raw_highway_loss)
 
-            # loss (first entry of outputs), is no longer one variable, but a list of them
-
             if train_strategy == 'raw':
                 outputs = (loss,) + outputs
             elif train_strategy.startswith("limit"):

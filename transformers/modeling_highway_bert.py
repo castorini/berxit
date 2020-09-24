@@ -379,7 +379,6 @@ class BertForSequenceClassification(BertPreTrainedModel):
                                             labels.view(-1))
                 highway_losses.append(highway_loss)
 
-            # loss (first entry of outputs) is no longer one variable, but a list of them
             if train_strategy.endswith("-lte"):
                 lte_loss_fct = MSELoss()
                 uncertainties = []
@@ -413,6 +412,38 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 else:
                     norm_exit_label = torch.clamp(exit_label, min=0.05, max=0.95)
                 outputs = (lte_loss_fct(exit_pred, norm_exit_label),) + outputs
+            elif train_strategy == 'all-singlelayer-jlte':  # there will be better ways
+                lte_loss_fct = MSELoss()
+                layer_acc = []
+                exit_pred = []
+                for i in range(self.num_layers):
+                    # uncertainty / prob to continue
+                    exit_pred.append(outputs[-1]['lte'][i])
+
+                    # label
+                    if i+1 == self.num_layers:
+                        layer_output = logits
+                    else:
+                        layer_output = outputs[-1]['highway'][i][0]
+                    if self.num_labels == 1:
+                        pass
+                        # correctness_loss = torch.pow(
+                        #     layer_output.squeeze() - labels,
+                        #     2
+                        # )
+                    else:
+                        lte_gold = torch.eq(
+                            torch.argmax(layer_output, dim=1),
+                            labels
+                        )  # 0 for wrong/continue, 1 for right/exit
+                        correctness_loss = 1 - lte_gold.float()  # 1 for continue, match exit_pred
+                    layer_acc.append(correctness_loss)
+                exit_pred = torch.stack(exit_pred)
+                exit_label = torch.stack(layer_acc).detach()
+                total_loss = loss + sum(highway_losses[:-1]) + lte_loss_fct(exit_pred, exit_label)
+                outputs = (total_loss,) + outputs
+            elif train_strategy.endswith('-alllayer-jlte'):
+                pass
             elif train_strategy == 'raw':
                 outputs = (loss,) + outputs
             elif train_strategy.startswith("limit"):

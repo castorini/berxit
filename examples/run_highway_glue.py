@@ -139,9 +139,12 @@ def get_args():
     parser.add_argument("--limit_layer", default="-1", type=str, required=False,
                         help="The layer for limit training.")
     parser.add_argument("--train_routine",
-                        choices=['raw', 'two_stage', 'all', 'self_distil',
-                                 'all_alternate', 'limit', 'all_alternate-lte',
-                                 'weight-linear', 'weight-sqrt', 'weight-sq'],
+                        choices=['two_stage', 'all', 'all_alternate',
+                                 'raw', 'self_distil', 'limit',
+                                 'weight-linear', 'weight-sqrt', 'weight-sq',
+                                 'all_alternate-lte',
+                                 'all-singlelayer-jlte'
+                                 ],
                         default='raw', type=str,
                         help="Training routine (a routine can have mutliple stages, each with different strategies.")
 
@@ -299,7 +302,8 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
              'weight_decay': 0.0}
         ]
     elif train_strategy in ['all', 'self_distil', 'all_alternate', 'limit',
-                            'weight-linear', 'weight-sqrt', 'weight-sq']:
+                            'weight-linear', 'weight-sqrt', 'weight-sq']\
+            or train_strategy.endswith('-jlte'):
         optimizer_grouped_parameters = [
             {'params': [p for n, p in model.named_parameters() if
                         not any(nd in n for nd in no_decay)],
@@ -784,13 +788,15 @@ def main(args):
 
     model.core.encoder.set_early_exit_entropy(args.early_exit_entropy)
     model.core.init_highway_pooler()
-    if args.train_routine.endswith("lte"):
+    if args.train_routine.endswith("-lte"):
         original_output_dir = args.output_dir.replace('-lte', '')
         tokenizer = tokenizer_class.from_pretrained(original_output_dir,
                                                     do_lower_case=args.do_lower_case)
         model = model_class.from_pretrained(original_output_dir)
         model.core.encoder.enable_lte(args)
         model.to(args.device)
+    elif args.train_routine.endswith("-jlte"):
+        model.core.encoder.enable_lte(args)
 
 
     if args.local_rank == 0:
@@ -821,7 +827,8 @@ def main(args):
         elif args.train_routine in ['raw', 'all', 'all_alternate',
                                     'self_distil', 'limit',
                                     'weight-linear', 'weight-sqrt', 'weight-sq'] \
-            or args.train_routine.endswith('-lte'):
+            or args.train_routine.endswith('-lte') \
+            or args.train_routine.endswith('-jlte'):
 
             global_step, tr_loss = train(args, train_dataset, model, tokenizer,
                                          train_strategy=args.train_routine)
@@ -869,7 +876,7 @@ def main(args):
             model = model_class.from_pretrained(checkpoint)
             model.core.encoder.set_early_exit_entropy(args.early_exit_entropy)
             model.to(args.device)
-            if args.train_routine.endswith('-lte'):
+            if args.train_routine.endswith('-lte') or args.train_routine.endswith('-jlte'):
                 model.core.encoder.enable_lte(args)
                 args.eval_highway = True  # triggers ERS measurement
 

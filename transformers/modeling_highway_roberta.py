@@ -106,7 +106,6 @@ class RobertaForSequenceClassification(BertPreTrainedModel):
                 highway_losses.append(highway_loss)
 
 
-            # loss (first entry of outputs), is no longer one variable, but a list of them
             if train_strategy.endswith("-lte"):
                 lte_loss_fct = MSELoss()
                 uncertainties = []
