@@ -1,4 +1,4 @@
-import math
+import os
 import torch
 from torch import nn
 from torch.nn import CrossEntropyLoss, MSELoss, BCELoss
@@ -379,7 +379,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
                                             labels.view(-1))
                 highway_losses.append(highway_loss)
 
-            if train_strategy.endswith("-lte"):
+            if train_strategy.endswith("-ilte"):  # individual lte; the original lte in EMNLP
                 lte_loss_fct = MSELoss()
                 uncertainties = []
                 exit_pred = []
@@ -412,7 +412,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 else:
                     norm_exit_label = torch.clamp(exit_label, min=0.05, max=0.95)
                 outputs = (lte_loss_fct(exit_pred, norm_exit_label),) + outputs
-            elif train_strategy == 'all-singlelayer-jlte':  # there will be better ways
+            elif train_strategy == 'alternate-lte':
                 lte_loss_fct = MSELoss()
                 layer_acc = []
                 exit_pred = []
@@ -426,11 +426,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
                     else:
                         layer_output = outputs[-1]['highway'][i][0]
                     if self.num_labels == 1:
-                        pass
-                        # correctness_loss = torch.pow(
-                        #     layer_output.squeeze() - labels,
-                        #     2
-                        # )
+                        correctness_loss = torch.tanh(layer_output.squeeze() - labels).abs()
                     else:
                         lte_gold = torch.eq(
                             torch.argmax(layer_output, dim=1),
@@ -440,40 +436,11 @@ class BertForSequenceClassification(BertPreTrainedModel):
                     layer_acc.append(correctness_loss)
                 exit_pred = torch.stack(exit_pred)
                 exit_label = torch.stack(layer_acc).detach()
-                total_loss = loss + sum(highway_losses[:-1]) + lte_loss_fct(exit_pred, exit_label)
-                with open('tmp-analysis/tmp_loss', 'a') as fout:
-                    print(lte_loss_fct(exit_pred, exit_label).float().item(), file=fout)
-                outputs = (total_loss,) + outputs
-            elif train_strategy == 'all-alllayer-jlte':
-                lte_loss_fct = BCELoss()
-                layer_acc = []
-                exit_pred = []
-                for i in range(self.num_layers):
-                    # uncertainty / prob to continue
-                    exit_pred.append(outputs[-1]['lte'][i])
-
-                    # label
-                    if i+1 == self.num_layers:
-                        layer_output = logits
-                    else:
-                        layer_output = outputs[-1]['highway'][i][0]
-                    if self.num_labels == 1:
-                        pass
-                        # correctness_loss = torch.pow(
-                        #     layer_output.squeeze() - labels,
-                        #     2
-                        # )
-                    else:
-                        lte_gold = torch.eq(
-                            torch.argmax(layer_output, dim=1),
-                            labels
-                        )  # 0 for wrong/continue, 1 for right/exit
-                        correctness_loss = 1 - lte_gold.float()  # 1 for continue, match exit_pred
-                    layer_acc.append(correctness_loss)
-                exit_pred = torch.stack(exit_pred)
-                exit_label = torch.stack(layer_acc).detach()
-                total_loss = loss + sum(highway_losses[:-1]) + lte_loss_fct(exit_pred, exit_label)
-                with open('tmp-analysis/tmp_loss', 'a') as fout:
+                if step_num%2 == 0:
+                    total_loss = loss + lte_loss_fct(exit_pred, exit_label)
+                else:
+                    total_loss = sum(highway_losses[:-1])  + lte_loss_fct(exit_pred, exit_label)
+                with open(os.environ['SLURM_TMPDIR']+'/tmp_loss', 'a') as fout:
                     print(lte_loss_fct(exit_pred, exit_label).float().item(), file=fout)
                 outputs = (total_loss,) + outputs
             elif train_strategy == 'raw':
@@ -496,21 +463,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 for i in range(self.num_layers-1):
                     loss_sum += highway_losses[i] * (1+i)
                 outputs = (loss_sum/weight_sum,) + outputs
-            elif train_strategy == 'weight-sqrt':
-                loss_sum = loss * math.sqrt(self.num_layers)
-                weight_sum = math.sqrt(self.num_layers)
-                for i in range(self.num_layers-1):
-                    loss_sum += highway_losses[i] * math.sqrt(1+i)
-                    weight_sum += math.sqrt(1+i)
-                outputs = (loss_sum/weight_sum,) + outputs
-            elif train_strategy == 'weight-sq':
-                loss_sum = loss * (self.num_layers**2)
-                weight_sum = self.num_layers**2
-                for i in range(self.num_layers-1):
-                    loss_sum += highway_losses[i] * (1+i)**2
-                    weight_sum += (1+i)**2
-                outputs = (loss_sum/weight_sum,) + outputs
-            elif train_strategy == 'all_alternate':
+            elif train_strategy == 'alternate':
                 if step_num%2==0:
                     outputs = (loss,) + outputs
                 else:

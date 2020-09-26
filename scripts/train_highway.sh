@@ -42,11 +42,6 @@ then
 fi
 
 LR=2e-5
-if [[ $ROUTINE = *-lte ]]
-then
-  EPOCHS=1
-  LR=2e-4
-fi
 
 
 echo ${MODEL_TYPE}-${MODEL_SIZE}/$DATASET $ROUTINE

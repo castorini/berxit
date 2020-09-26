@@ -139,11 +139,10 @@ def get_args():
     parser.add_argument("--limit_layer", default="-1", type=str, required=False,
                         help="The layer for limit training.")
     parser.add_argument("--train_routine",
-                        choices=['two_stage', 'all', 'all_alternate',
+                        choices=['two_stage', 'all', 'alternate',
                                  'raw', 'self_distil', 'limit',
-                                 'weight-linear', 'weight-sqrt', 'weight-sq',
-                                 'all_alternate-lte',
-                                 'all-singlelayer-jlte', 'all-alllayer-jlte'
+                                 'weight-linear',
+                                 'alternate-lte',
                                  ],
                         default='raw', type=str,
                         help="Training routine (a routine can have mutliple stages, each with different strategies.")
@@ -257,7 +256,8 @@ def cal_num_parameters(model):
 def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
     """ Train the model """
     if args.local_rank in [-1, 0]:
-        tb_writer = SummaryWriter()
+        pass
+        # tb_writer = SummaryWriter()
 
     args.train_batch_size = args.per_gpu_train_batch_size * max(1, args.n_gpu)
     train_sampler = RandomSampler(train_dataset) if args.local_rank == -1 else DistributedSampler(train_dataset)
@@ -273,16 +273,7 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
 
     # Prepare optimizer and schedule (linear warmup and decay)
     no_decay = ['bias', 'LayerNorm.weight']
-    if train_strategy.endswith('-lte'):
-        optimizer_grouped_parameters = [
-            {'params': [p for n, p in model.named_parameters() if
-                        ("lte" in n) and (not any(nd in n for nd in no_decay))],
-             'weight_decay': args.weight_decay},
-            {'params': [p for n, p in model.named_parameters() if
-                        ("lte" in n) and (any(nd in n for nd in no_decay))],
-             'weight_decay': 0.0}
-        ]
-    elif train_strategy == 'raw':
+    if train_strategy == 'raw':
         # the original bert model
         optimizer_grouped_parameters = [
             {'params': [p for n, p in model.named_parameters() if
@@ -301,9 +292,9 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
                         ("highway" in n) and (any(nd in n for nd in no_decay))],
              'weight_decay': 0.0}
         ]
-    elif train_strategy in ['all', 'self_distil', 'all_alternate', 'limit',
-                            'weight-linear', 'weight-sqrt', 'weight-sq']\
-            or train_strategy.endswith('-jlte'):
+    elif train_strategy in ['all', 'self_distil', 'alternate', 'limit',
+                            'weight-linear']\
+            or train_strategy.endswith('-lte'):
         optimizer_grouped_parameters = [
             {'params': [p for n, p in model.named_parameters() if
                         not any(nd in n for nd in no_decay)],
@@ -425,7 +416,8 @@ def train(args, train_dataset, model, tokenizer, train_strategy='raw'):
             break
     fout.close()
     if args.local_rank in [-1, 0]:
-        tb_writer.close()
+        pass
+        # tb_writer.close()
 
     return global_step, tr_loss / global_step
 
@@ -790,13 +782,6 @@ def main(args):
     model.core.encoder.set_early_exit_entropy(args.early_exit_entropy)
     model.core.init_highway_pooler()
     if args.train_routine.endswith("-lte"):
-        original_output_dir = args.output_dir.replace('-lte', '')
-        tokenizer = tokenizer_class.from_pretrained(original_output_dir,
-                                                    do_lower_case=args.do_lower_case)
-        model = model_class.from_pretrained(original_output_dir)
-        model.core.encoder.enable_lte(args)
-        model.to(args.device)
-    elif args.train_routine.endswith("-jlte"):
         model.core.encoder.enable_lte(args)
 
 
@@ -825,11 +810,10 @@ def main(args):
             global_step, tr_loss = train(args, train_dataset, model, tokenizer,
                                          train_strategy="only_highway")
 
-        elif args.train_routine in ['raw', 'all', 'all_alternate',
+        elif args.train_routine in ['raw', 'all', 'alternate',
                                     'self_distil', 'limit',
-                                    'weight-linear', 'weight-sqrt', 'weight-sq'] \
-            or args.train_routine.endswith('-lte') \
-            or args.train_routine.endswith('-jlte'):
+                                    'weight-linear',] \
+            or args.train_routine.endswith('-lte'):
 
             global_step, tr_loss = train(args, train_dataset, model, tokenizer,
                                          train_strategy=args.train_routine)
@@ -877,7 +861,7 @@ def main(args):
             model = model_class.from_pretrained(checkpoint)
             model.core.encoder.set_early_exit_entropy(args.early_exit_entropy)
             model.to(args.device)
-            if args.train_routine.endswith('-lte') or args.train_routine.endswith('-jlte'):
+            if args.train_routine.endswith('-lte'):
                 model.core.encoder.enable_lte(args)
                 args.eval_highway = True  # triggers ERS measurement
 
