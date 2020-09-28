@@ -15,15 +15,24 @@ MODEL_SIZE=${2}
 DATASET=${3}
 SEED=42
 ROUTINE=${4}
-TESTSET=${5}  # generate result for the test set
 
-TESTSET_SWITCH=''
-if [ ! -z $TESTSET ] && [ $TESTSET = 'testset' ]
+if [ ! -z ${5} ]
 then
-  TESTSET_SWITCH='--testset'
+  NOCOMET_SWITCH='--no_comet'
+  if [ ${5} = 'testset' ]
+  then
+    LTE_TH='-1'  # set it to "-1" to trigger eval_each_highway
+    TESTSET_SWITCH='--testset'
+  else
+    LTE_TH=${5}
+    TESTSET_SWITCH=''
+  fi
+else
+  LTE_TH='-1'
+  NOCOMET_SWITCH=''
+  TESTSET_SWITCH=''
 fi
 
-LTE_TH="-1"  # set it to "-1" to trigger eval_each_highway
 
 if [ -z $SLURM_SRUN_COMM_HOST ]
 then
@@ -49,6 +58,7 @@ python -um examples.run_highway_glue \
   --train_routine $ROUTINE \
   --lte_th $LTE_TH \
   --log_id $SLURM_JOB_ID \
+  $NOCOMET_SWITCH \
   $TESTSET_SWITCH
 
 

@@ -562,7 +562,8 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
                     experiment.log_metrics({
                         "eval_time": eval_time,
                         "ERS": actual_cost / full_cost,
-                        "result": print_result
+                        "avg-layer": actual_cost / full_cost * model.num_layers,
+                        "result": print_result,
                     })
                     experiment.log_other(
                         "exit_layer_counter",
@@ -585,7 +586,8 @@ def evaluate(args, model, tokenizer, prefix="", output_layer=-1, eval_highway=Fa
                 experiment.log_metrics({
                     "eval_time": eval_time,
                     "ERS": actual_cost / full_cost,
-                    "result": print_result
+                    "avg-layer": actual_cost / full_cost * model.num_layers,
+                    "result": print_result,
                 })
                 experiment.log_other(
                     "exit_layer_counter",
@@ -889,7 +891,7 @@ def main(args):
                 each_layer_results.append(last_layer_results)
                 experiment.log_other(
                     "Each layer result",
-                    ' '.join([str(int(100 * x)) for x in each_layer_results]))
+                    ' '.join(['{:.0f}'.format(100*x) for x in each_layer_results]))
                 save_fname = args.plot_data_dir + args.model_name_or_path[2:] + "/each_layer.npy"
                 if not os.path.exists(os.path.dirname(save_fname)):
                     os.makedirs(os.path.dirname(save_fname))

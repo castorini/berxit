@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 try:
     from scipy.stats import pearsonr, spearmanr
-    from sklearn.metrics import matthews_corrcoef, f1_score
+    from sklearn.metrics import matthews_corrcoef, f1_score, mean_squared_error
     _has_sklearn = True
 except (AttributeError, ImportError) as e:
     logger.warning("To use data.metrics please install scikit-learn. See https://scikit-learn.org/stable/index.html")
@@ -47,13 +47,15 @@ if _has_sklearn:
         }
 
 
-    def pearson_and_spearman(preds, labels):
+    def pearson_and_spearman_and_rmse(preds, labels):
         pearson_corr = pearsonr(preds, labels)[0]
         spearman_corr = spearmanr(preds, labels)[0]
+        mse = mean_squared_error(labels, preds, squared=False)
         return {
             "pearson": pearson_corr,
             "spearmanr": spearman_corr,
             "corr": (pearson_corr + spearman_corr) / 2,
+            "rmse": mse,  # root mean squared error
         }
 
 
@@ -66,9 +68,9 @@ if _has_sklearn:
         elif task_name == "mrpc":
             return acc_and_f1(preds, labels)
         elif task_name == "sts-b":
-            return pearson_and_spearman(preds, labels)
+            return pearson_and_spearman_and_rmse(preds, labels)
         elif task_name == "sick":
-            return pearson_and_spearman(preds, labels)
+            return pearson_and_spearman_and_rmse(preds, labels)
         elif task_name == "qqp":
             return acc_and_f1(preds, labels)
         elif task_name == "mnli":
