@@ -5,8 +5,10 @@ formal_name = {
     "shrink-1": "weight-tok",
     "all": "joint",
     "all_alternate": "alt",
+    "alternate": "alt",
     "all_alternate-Qvlstm": "alt-Q",
     "all_alternate-lte": "alt-lte",
+    "alternate-lte": "alt-lte",
     "two_stage": "2stg",
     "self_distil": "sd",
 }
