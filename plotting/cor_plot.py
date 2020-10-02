@@ -29,7 +29,7 @@ def plot_dataset(axes, dataset):
     lim = 0.8 if dataset=='MRPC' else 0.5
     axes.set_ylim(-lim, lim)
     axes.set_title(title)
-    axes.legend(loc='upper left' if dataset=='MRPC' else 'lower right')
+    axes.legend(loc='lower left' if dataset=='MRPC' else 'upper right')
 
     twin_axes = axes.twinx()
     if RELATIVE:

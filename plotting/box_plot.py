@@ -15,11 +15,11 @@ target = sys.argv[1]  # entropy or uncertainty
 
 if target == 'entropy':
     dataset = 'MRPC'
-    np_data = np.load(f'saved_models/{model}/{dataset}/all_alternate-42/entropy_distri.npy')
+    np_data = np.load(f'saved_models/{model}/{dataset}/alternate-42/entropy_distri.npy')
     box_data = list(np_data.transpose())
     title = 'BERT\\textsubscript{\\textsc{base}} : MRPC'
-    acc_data = np.load(f'saved_models/{model}/{dataset}/all_alternate-42/each_layer.npy')
-else:
+    acc_data = np.load(f'saved_models/{model}/{dataset}/alternate-42/each_layer.npy')
+elif target == 'uncertainty':
     dataset = 'STS-B'
     box_data = [[] for _ in range(layers)]
     with open(f'saved_models/{model}/{dataset}/all_alternate-lte-42/uncertainty.txt') as fin:
@@ -29,8 +29,18 @@ else:
                 box_data[i].append(float(a[i]))
     title = 'BERT\\textsubscript{\\textsc{base}} : STS-B'
     acc_data = np.load(f'saved_models/{model}/{dataset}/all_alternate-42/each_layer.npy')
+elif target == 'certainty':
+    dataset = sys.argv[2]
+    box_data = [[] for _ in range(layers)]
+    with open(f'saved_models/{model}/{dataset}/alternate-lte-42/uncertainty.txt') as fin:
+        for line in fin:
+            a = line.split('\t')
+            for i in range(layers):
+                box_data[i].append(1-float(a[i]))
+    title = 'BERT\\textsubscript{\\textsc{base}} : ' + dataset
+    acc_data = np.load(f'saved_models/{model}/{dataset}/alternate-42/each_layer.npy')
 
-fig, axes = plt.subplots(1, 1, figsize=[8, 3])
+fig, axes = plt.subplots(1, 1, figsize=[8, 4])
 
 sns.boxplot(
     data=box_data,
@@ -50,4 +60,4 @@ twin_axes.set_ylabel("Relative Score (\\%)")
 
 plt.tight_layout(pad=0.5)
 plt.show()
-# plt.savefig('box-'+target+'.pdf')
+# plt.savefig('box-'+dataset+'-'+target+'.pdf')
