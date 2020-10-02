@@ -379,40 +379,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
                                             labels.view(-1))
                 highway_losses.append(highway_loss)
 
-            if train_strategy.endswith("-ilte"):  # individual lte; the original lte in EMNLP
-                lte_loss_fct = MSELoss()
-                uncertainties = []
-                exit_pred = []
-                for i in range(self.num_layers):
-                    # exit prediction
-                    exit_pred.append(outputs[-1]['lte'][i])  # "uncertainty"
-
-                    # exit label
-                    if self.num_labels == 1:
-                        if i + 1 == self.num_layers:
-                            layer_output = logits
-                        else:
-                            layer_output = outputs[-1]['highway'][i][0]
-                        layer_uncertainty = torch.pow(
-                            layer_output.squeeze() - labels,
-                            2
-                        )
-                    else:
-                        if i+1 == self.num_layers:
-                            layer_uncertainty = entropy(logits)
-                        else:
-                            layer_uncertainty = entropy(highway_all_logits[i])
-                    uncertainties.append(layer_uncertainty)
-                exit_pred = torch.stack(exit_pred)
-                exit_label = torch.stack(uncertainties).detach()
-
-                # normalize exit label
-                if self.num_labels == 1:
-                    norm_exit_label = 1 - torch.exp(-exit_label)
-                else:
-                    norm_exit_label = torch.clamp(exit_label, min=0.05, max=0.95)
-                outputs = (lte_loss_fct(exit_pred, norm_exit_label),) + outputs
-            elif train_strategy == 'alternate-lte':
+            if train_strategy == 'alternate-lte':
                 lte_loss_fct = MSELoss()
                 layer_acc = []
                 exit_pred = []

@@ -1,6 +1,6 @@
 from __future__ import (absolute_import, division, print_function,
                         unicode_literals)
-
+import os
 import torch
 import torch.nn as nn
 from torch.nn import CrossEntropyLoss, MSELoss
@@ -105,55 +105,58 @@ class RobertaForSequenceClassification(BertPreTrainedModel):
                                             labels.view(-1))
                 highway_losses.append(highway_loss)
 
-
-            if train_strategy.endswith("-lte"):
+            if train_strategy == 'alternate-lte':
                 lte_loss_fct = MSELoss()
-                uncertainties = []
+                layer_acc = []
                 exit_pred = []
                 for i in range(self.num_layers):
-                    # exit prediction
-                    exit_pred.append(outputs[-1]['lte'][i])  # "uncertainty"
+                    # uncertainty / prob to continue
+                    exit_pred.append(outputs[-1]['lte'][i])
 
-                    # exit label
-                    if self.num_labels == 1:
-                        if i + 1 == self.num_layers:
-                            layer_output = logits
-                        else:
-                            layer_output = outputs[-1]['highway'][i][0]
-                        layer_uncertainty = torch.pow(
-                            layer_output.squeeze() - labels,
-                            2
-                        )
+                    # label
+                    if i + 1 == self.num_layers:
+                        layer_output = logits
                     else:
-                        if i + 1 == self.num_layers:
-                            layer_uncertainty = entropy(logits)
-                        else:
-                            layer_uncertainty = entropy(highway_all_logits[i])
-                    uncertainties.append(layer_uncertainty)
+                        layer_output = outputs[-1]['highway'][i][0]
+                    if self.num_labels == 1:
+                        correctness_loss = torch.tanh(layer_output.squeeze() - labels).abs()
+                    else:
+                        lte_gold = torch.eq(
+                            torch.argmax(layer_output, dim=1),
+                            labels
+                        )  # 0 for wrong/continue, 1 for right/exit
+                        correctness_loss = 1 - lte_gold.float()  # 1 for continue, match exit_pred
+                    layer_acc.append(correctness_loss)
                 exit_pred = torch.stack(exit_pred)
-                exit_label = torch.stack(uncertainties).detach()
-
-                # normalize exit label
-                if self.num_labels == 1:
-                    norm_exit_label = 1 - torch.exp(-exit_label)
+                exit_label = torch.stack(layer_acc).detach()
+                if step_num % 2 == 0:
+                    total_loss = loss + lte_loss_fct(exit_pred, exit_label)
                 else:
-                    norm_exit_label = torch.clamp(exit_label, min=0.05, max=0.95)
-                outputs = (lte_loss_fct(exit_pred, norm_exit_label),) + outputs
+                    total_loss = sum(highway_losses[:-1]) + lte_loss_fct(exit_pred, exit_label)
+                with open(os.environ['SLURM_TMPDIR'] + '/tmp_loss', 'a') as fout:
+                    print(lte_loss_fct(exit_pred, exit_label).float().item(), file=fout)
+                outputs = (total_loss,) + outputs
             elif train_strategy == 'raw':
                 outputs = (loss,) + outputs
             elif train_strategy.startswith("limit"):
                 target_layer = int(train_strategy[5:])
-                if target_layer+1 == self.num_layers:
+                if target_layer + 1 == self.num_layers:
                     outputs = (loss,) + outputs
                 else:
                     outputs = (highway_losses[target_layer],) + outputs
             elif train_strategy == 'only_highway':
                 outputs = (sum(highway_losses[:-1]),) + outputs
                 # exclude the final highway, of course
-            elif train_strategy in ['all']:
+            elif train_strategy == 'all':
                 outputs = (sum(highway_losses[:-1]) + loss,) + outputs
                 # all highways (exclude the final one), plus the original classifier
-            elif train_strategy == 'all_alternate':
+            elif train_strategy == 'weight-linear':
+                loss_sum = loss * self.num_layers
+                weight_sum = (1 + self.num_layers) * self.num_layers / 2
+                for i in range(self.num_layers - 1):
+                    loss_sum += highway_losses[i] * (1 + i)
+                outputs = (loss_sum / weight_sum,) + outputs
+            elif train_strategy == 'alternate':
                 if step_num % 2 == 0:
                     outputs = (loss,) + outputs
                 else:
@@ -162,13 +165,13 @@ class RobertaForSequenceClassification(BertPreTrainedModel):
             elif train_strategy == 'self_distil':
                 # the following input_logits are before softmax
                 # final layer logits: logits
-                # logits from layer[i]: outputs[-1][i][0]
+                # logits from layer[i]: outputs[-1]["highway"][i][0]
                 temperature = 1.0
                 softmax_fct = nn.Softmax(dim=1)
                 teacher_softmax = softmax_fct(logits.detach()) / temperature
                 distil_losses = []
                 for i in range(self.num_layers - 1):
-                    student_softmax = softmax_fct(outputs[-1][i][0]) / temperature
+                    student_softmax = softmax_fct(outputs[-1]["highway"][i][0]) / temperature
                     distil_losses.append(
                         - temperature ** 2 * torch.sum(
                             teacher_softmax * torch.log(student_softmax))

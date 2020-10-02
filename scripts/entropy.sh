@@ -4,6 +4,7 @@
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=32GB
 #SBATCH --time=12:0:0
+#SBATCH --output=/dev/null
 
 export CUDA_VISIBLE_DEVICES=0
 

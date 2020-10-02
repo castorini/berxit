@@ -311,23 +311,29 @@ class AlbertForSequenceClassification(AlbertPreTrainedModel):
                 outputs = (loss,) + outputs
             elif train_strategy.startswith("limit"):
                 target_layer = int(train_strategy[5:])
-                if target_layer+1 == self.num_layers:
+                if target_layer + 1 == self.num_layers:
                     outputs = (loss,) + outputs
                 else:
                     outputs = (highway_losses[target_layer],) + outputs
-            elif train_strategy=='only_highway':
+            elif train_strategy == 'only_highway':
                 outputs = (sum(highway_losses[:-1]),) + outputs
                 # exclude the final highway, of course
-            elif train_strategy in ['all']:
-                outputs = (sum(highway_losses[:-1])+loss,) + outputs
+            elif train_strategy == 'all':
+                outputs = (sum(highway_losses[:-1]) + loss,) + outputs
                 # all highways (exclude the final one), plus the original classifier
-            elif train_strategy == 'all_alternate':
-                if step_num%2==0:
+            elif train_strategy == 'weight-linear':
+                loss_sum = loss * self.num_layers
+                weight_sum = (1 + self.num_layers) * self.num_layers / 2
+                for i in range(self.num_layers - 1):
+                    loss_sum += highway_losses[i] * (1 + i)
+                outputs = (loss_sum / weight_sum,) + outputs
+            elif train_strategy == 'alternate':
+                if step_num % 2 == 0:
                     outputs = (loss,) + outputs
                 else:
-                    outputs = (sum(highway_losses[:-1])+loss,) + outputs
+                    outputs = (sum(highway_losses[:-1]) + loss,) + outputs
                     # all highways (exclude the final one), plus the original classifier
-            elif train_strategy=='self_distil':
+            elif train_strategy == 'self_distil':
                 # the following input_logits are before softmax
                 # final layer logits: logits
                 # logits from layer[i]: outputs[-1]["highway"][i][0]
@@ -335,13 +341,13 @@ class AlbertForSequenceClassification(AlbertPreTrainedModel):
                 softmax_fct = nn.Softmax(dim=1)
                 teacher_softmax = softmax_fct(logits.detach()) / temperature
                 distil_losses = []
-                for i in range(self.num_layers-1):
+                for i in range(self.num_layers - 1):
                     student_softmax = softmax_fct(outputs[-1]["highway"][i][0]) / temperature
                     distil_losses.append(
-                        - temperature**2 * torch.sum(
+                        - temperature ** 2 * torch.sum(
                             teacher_softmax * torch.log(student_softmax))
                     )
-                outputs = (sum(highway_losses[:-1]) + loss + sum(distil_losses),)\
+                outputs = (sum(highway_losses[:-1]) + loss + sum(distil_losses),) \
                           + outputs
             else:
                 raise NotImplementedError("Wrong training strategy!")

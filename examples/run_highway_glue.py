@@ -695,11 +695,17 @@ def main(args):
                          :model_and_size.find('/')
                          ]
     else:  # training
-        flag = args.model_name_or_path.find('-uncased')
+        flag = args.model_name_or_path.find('-uncased')  # bert
         if flag == -1:
             model_and_size = args.model_name_or_path
         else:
             model_and_size = args.model_name_or_path[:flag]
+
+        flag = args.model_name_or_path.find('-v2')  # albert
+        if flag == -1:
+            model_and_size = model_and_size
+        else:
+            model_and_size = model_and_size[:flag]
     experiment.log_parameter(
         "model_and_size",
         model_and_size

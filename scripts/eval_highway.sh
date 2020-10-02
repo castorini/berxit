@@ -22,6 +22,7 @@ then
   if [ ${5} = 'testset' ]
   then
     LTE_TH='-1'  # set it to "-1" to trigger eval_each_highway
+                 # set it to "0.0" to trigger uncertainty recording
     TESTSET_SWITCH='--testset'
   else
     LTE_TH=${5}
