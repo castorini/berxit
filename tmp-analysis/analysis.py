@@ -2,6 +2,7 @@ import os
 import sys
 import numpy as np
 from scipy.stats import pearsonr
+from scipy.optimize import fsolve
 import matplotlib.pyplot as plt
 from nltk.translate.bleu_score import sentence_bleu
 
@@ -15,6 +16,10 @@ filters = {
     'MRPC': lambda x: x.split('\t')[3:5] + [x[0]],
     'QNLI': lambda x: x.split('\t')[1:]
 }  # returns [Q1, Q2, score]
+
+def etp_to_conf(x):
+   etp_func = lambda p: -p*np.log(p+1e-10) - (1-p)*np.log(1-p+1e-10) - x
+   return fsolve(etp_func, 0.9999)[0]
 
 
 def obtain_data(model, dataset, chosen_layer, filter):
@@ -46,7 +51,8 @@ def obtain_data(model, dataset, chosen_layer, filter):
                 instance[1],  # the two sentences
                 label_processor(instance[2]),  # label
                 pred[i],  # prediction
-                etp[i, chosen_layer],  # entropy
+                #etp[i, chosen_layer],  # entropy
+                etp_to_conf(etp[i, chosen_layer]),  # entropy
             ])
 
     return col

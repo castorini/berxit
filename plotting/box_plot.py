@@ -40,7 +40,7 @@ elif target == 'certainty':
     title = 'BERT\\textsubscript{\\textsc{base}} : ' + dataset
     acc_data = np.load(f'saved_models/{model}/{dataset}/alternate-42/each_layer.npy')
 
-fig, axes = plt.subplots(1, 1, figsize=[8, 4])
+fig, axes = plt.subplots(1, 1, figsize=[8, 3])
 
 sns.boxplot(
     data=box_data,
@@ -58,6 +58,6 @@ if RELATIVE:
 twin_axes.plot(acc_data, 'o-')
 twin_axes.set_ylabel("Relative Score (\\%)")
 
-plt.tight_layout(pad=0.5)
-plt.show()
-# plt.savefig('box-'+dataset+'-'+target+'.pdf')
+plt.tight_layout(pad=0.2)
+# plt.show()
+plt.savefig('box-'+dataset+'-'+target+'.pdf')
