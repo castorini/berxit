@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 from nltk.translate.bleu_score import sentence_bleu
 
 model = 'bert-base'
-routine = 'all_alternate'
+routine = 'alternate'
 dataset = sys.argv[1]
 # chosen_layer = 3
 

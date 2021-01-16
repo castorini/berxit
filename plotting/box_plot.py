@@ -11,15 +11,17 @@ layers = 12 if model.endswith('base') else 24
 matplotlib.rc('font', size=20)
 matplotlib.rc('text', usetex=True)
 
-target = sys.argv[1]  # entropy or uncertainty
+target = sys.argv[1]  # IT MUST BE certainty!!!
 
 if target == 'entropy':
+    # deprecated
     dataset = 'MRPC'
     np_data = np.load(f'saved_models/{model}/{dataset}/alternate-42/entropy_distri.npy')
     box_data = list(np_data.transpose())
     title = 'BERT\\textsubscript{\\textsc{base}} : MRPC'
     acc_data = np.load(f'saved_models/{model}/{dataset}/alternate-42/each_layer.npy')
 elif target == 'uncertainty':
+    # deprecated
     dataset = 'STS-B'
     box_data = [[] for _ in range(layers)]
     with open(f'saved_models/{model}/{dataset}/all_alternate-lte-42/uncertainty.txt') as fin:
@@ -59,5 +61,5 @@ twin_axes.plot(acc_data, 'o-')
 twin_axes.set_ylabel("Relative Score (\\%)")
 
 plt.tight_layout(pad=0.2)
-# plt.show()
-plt.savefig('box-'+dataset+'-'+target+'.pdf')
+plt.show()
+# plt.savefig('figs/box-'+dataset+'-'+target+'.pdf')

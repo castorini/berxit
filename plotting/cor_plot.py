@@ -13,7 +13,7 @@ fig, axes = plt.subplots(2, 1, figsize=[8, 6])
 def plot_dataset(axes, dataset):
     title = 'BERT\\textsubscript{\\textsc{base}} : ' + dataset
 
-    acc_data = np.load(f'saved_models/bert-base/{dataset}/all_alternate-42/each_layer.npy')
+    acc_data = np.load(f'saved_models/bert-base/{dataset}/alternate-42/each_layer.npy')
     cor_data = np.load(f'../difficulty/{dataset}-cor.npy')
 
     axes.plot(range(1, 13), cor_data[:, 1], 'o-', color='r', label='pos.')
@@ -42,5 +42,5 @@ plot_dataset(axes[0], 'MRPC')
 plot_dataset(axes[1], 'QQP')
 
 plt.tight_layout(pad=0.3, h_pad=0.2)
-# plt.show()
-plt.savefig('cor.pdf')
+plt.show()
+# plt.savefig('figs/cor.pdf')
